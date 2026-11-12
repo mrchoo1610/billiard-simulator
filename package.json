@@ -1,0 +1,11 @@
+{
+  "name": "billiard-simulator",
+  "private": true,
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Bida 9 bi - Tap luyen (no dependencies, no build step)",
+  "scripts": {
+    "test": "node --test \"tests/core/*.test.mjs\"",
+    "audit": "node scripts/physics-audit.mjs"
+  }
+}

@@ -1,0 +1,294 @@
+// Control panel DOM: info rows, sliders, spin pad, ball tray, drill panels, toasts.
+// No app state lives here; app.js passes state in and receives events through `handlers`.
+import { createSpinPad } from './input.js';
+import { BALL_COLORS } from './render.js';
+import { FULLNESS_LABELS } from '../core/geometry.js';
+
+const $ = (id) => document.getElementById(id);
+export const fmtDeg = (d, digits = 1) => `${Number(d).toFixed(digits).replace('.', ',')}°`;
+
+export const fmtSigned = (d, digits = 1) => `${d < 0 ? '−' : '+'}${Math.abs(Number(d)).toFixed(digits).replace('.', ',')}°`;
+
+export function tipText(t) {
+  const parts = [];
+  if (Math.abs(t.y) > 0.05) parts.push(`${t.y > 0 ? 'Cao' : 'Thấp'} ${Math.round(Math.abs(t.y) * 100)}%`);
+  if (Math.abs(t.x) > 0.05) parts.push(`${t.x > 0 ? 'Phải' : 'Trái'} ${Math.round(Math.abs(t.x) * 100)}%`);
+  return parts.length ? parts.join(' · ') : 'Giữa (bi dừng)';
+}
+
+let toastTimer = 0;
+export function toast(msg, kind = '') {
+  const el = $('toast');
+  el.textContent = msg;
+  el.className = `toast show ${kind}`;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove('show'), 2800);
+}
+
+/**
+ * handlers: { onPower(p 0..1), onAim(deg), onTip(tip), onNudge(deltaDeg), onAimMode(), onShoot, onReset, onRandom, onRack, onShare,
+ *   onOverlay(key, on), onMode(mode), onThickPick(label), onNextThick, onNextPos, onHint,
+ *   onNextSquirt, onHintSquirt, onToggleBall(id), onPanelToggle }
+ */
+export function createPanel(h) {
+  const spinPad = createSpinPad($('spin'), (tip) => {
+    $('spinLabel').textContent = tipText(tip);
+    h.onTip(tip);
+  });
+
+  $('power').addEventListener('input', (e) => {
+    $('powerVal').textContent = `${e.target.value}%`;
+    h.onPower(Number(e.target.value) / 100);
+  });
+  $('aimOffset').addEventListener('input', (e) => {
+    $('aimOffsetVal').textContent = fmtDeg(Number(e.target.value));
+    h.onAim(Number(e.target.value));
+  });
+  $('elevation').addEventListener('input', (e) => {
+    $('elevationVal').textContent = `${e.target.value}°`;
+    h.onElevation(Number(e.target.value));
+  });
+  $('chkComp').addEventListener('change', (e) => h.onComp(e.target.checked));
+  $('btnShoot').addEventListener('click', () => h.onShoot());
+  $('btnReset').addEventListener('click', () => h.onReset());
+  $('btnRandom').addEventListener('click', () => h.onRandom());
+  $('btnRack').addEventListener('click', () => h.onRack());
+  $('btnShare').addEventListener('click', () => h.onShare());
+  $('btnNextThick').addEventListener('click', () => h.onNextThick());
+  $('btnNextPos').addEventListener('click', () => h.onNextPos());
+  $('btnHint').addEventListener('click', () => h.onHint());
+  $('btnNextSquirt').addEventListener('click', () => h.onNextSquirt());
+  $('btnHintSquirt').addEventListener('click', () => h.onHintSquirt());
+
+  // aim fine-tune buttons: tap = one step, hold = repeat
+  for (const btn of document.querySelectorAll('[data-nudge]')) {
+    const step = Number(btn.dataset.nudge);
+    let delay = 0;
+    let rep = 0;
+    const stop = () => {
+      clearTimeout(delay);
+      clearInterval(rep);
+    };
+    btn.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      e.preventDefault();
+      stop();
+      h.onNudge(step);
+      delay = setTimeout(() => {
+        rep = setInterval(() => h.onNudge(step), 70);
+      }, 400);
+    });
+    for (const ev of ['pointerup', 'pointercancel', 'pointerleave']) btn.addEventListener(ev, stop);
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    btn.addEventListener('click', (e) => {
+      if (e.detail === 0) h.onNudge(step); // keyboard activation
+    });
+  }
+  $('btnAimMode').addEventListener('click', () => h.onAimMode());
+
+  for (const cb of document.querySelectorAll('[data-ov]')) {
+    cb.addEventListener('change', () => h.onOverlay(cb.dataset.ov, cb.checked));
+  }
+  for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => h.onMode(b.dataset.mode));
+
+  // thickness choices
+  for (const label of FULLNESS_LABELS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn';
+    b.textContent = label;
+    b.dataset.label = label;
+    b.addEventListener('click', () => h.onThickPick(label));
+    $('thickChoices').appendChild(b);
+  }
+
+  // panel toggle (phones)
+  $('panelToggle').addEventListener('click', () => {
+    const open = !$('panel').classList.contains('open');
+    $('panel').classList.toggle('open', open);
+    $('panelToggle').setAttribute('aria-expanded', String(open));
+    $('panelToggleText').textContent = open ? 'Đóng bảng điều khiển' : 'Mở bảng điều khiển';
+    h.onPanelToggle();
+  });
+
+  function refreshTray(has) {
+    const tray = $('tray');
+    if (!tray.children.length) {
+      for (let id = 1; id <= 9; id++) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'chip';
+        b.textContent = String(id);
+        b.dataset.id = String(id);
+        b.style.background = id === 9 ? 'linear-gradient(#f7f6ef 0 25%, #f4c20d 25% 75%, #f7f6ef 75%)' : BALL_COLORS[id];
+        if (id === 9) b.style.color = '#222';
+        b.setAttribute('aria-label', `Bi ${id}`);
+        b.addEventListener('click', () => h.onToggleBall(id));
+        tray.appendChild(b);
+      }
+    }
+    for (const b of tray.children) b.setAttribute('aria-pressed', String(!!has(Number(b.dataset.id))));
+  }
+
+  const speedText = (mps) => `${mps.toFixed(1).replace('.', ',')} m/s`;
+
+  /**
+   * info: aim data or null. opts: { hideAnswer, launch: {speed (mm/s), squirtDeg (signed), miscue}, tip, aimOffset }
+   */
+  function updateInfo(info, opts = {}) {
+    const ids = ['infoCut', 'infoFull', 'infoDistCue', 'infoDistPocket'];
+    const warn = $('infoWarn');
+    const hideAnswer = !!opts.hideAnswer;
+    const launch = opts.launch;
+    $('infoSpeed').textContent = launch ? speedText(launch.speed / 1000) : '–';
+    const showSquirt = !!launch && !launch.miscue && Math.abs(opts.tipX || 0) > 0.02;
+    // Row is always shown (value '–' when not applicable) so the panel height never jumps.
+    updateComp(opts.comp);
+    if (!showSquirt) $('infoSquirt').textContent = '–';
+    if (showSquirt) {
+      const deg = Math.abs(launch.squirtDeg);
+      // right english pushes the ball left, so compensate by aiming to the right (and vice versa)
+      const dir = launch.squirtDeg < 0 ? 'ngắm lệch phải' : 'ngắm lệch trái';
+      $('infoSquirt').textContent = opts.hideSquirtValue ? '?' : `${fmtDeg(deg)} (${dir})`;
+    }
+    if (!info || hideAnswer || (info.manual && !info.hit)) {
+      for (const id of ids) $(id).textContent = hideAnswer && info ? '?' : '–';
+      if (info && hideAnswer) {
+        $('infoDistCue').textContent = `${(info.distCue / 10).toFixed(0)} cm`;
+        $('infoDistPocket').textContent = `${(info.distPocket / 10).toFixed(0)} cm`;
+      }
+      const msgs0 = [];
+      if (info && info.manual && !info.hit && !hideAnswer) msgs0.push('Không chạm bi nào');
+      if (launch && launch.miscue) msgs0.push('Điểm chạm vượt giới hạn của gậy – sẽ trượt cơ (miscue)');
+      setWarn(warn, msgs0);
+      return;
+    }
+    $('infoCut').textContent = fmtDeg(info.cutAngleDeg);
+    $('infoFull').textContent = `${info.fullnessLabel} (${Math.round(info.fullness * 100)}%)`;
+    $('infoDistCue').textContent = `${(info.distCue / 10).toFixed(0)} cm`;
+    $('infoDistPocket').textContent = info.distPocket === null ? '–' : `${(info.distPocket / 10).toFixed(0)} cm`;
+    const msgs = [];
+    if (info.manual) msgs.push(`Chạm bi ${info.objId} trước`);
+    if (info.blockedCue !== null) msgs.push(`Đường ngắm bị bi ${info.blockedCue} chặn`);
+    if (info.blockedObj !== null) msgs.push(`Đường vào lỗ bị bi ${info.blockedObj} chặn`);
+    if (!info.manual && !info.possible) msgs.push('Góc cắt quá lớn – không thể vào lỗ này');
+    if (launch && launch.miscue) msgs.push('Điểm chạm vượt giới hạn của gậy – sẽ trượt cơ (miscue)');
+    setWarn(warn, msgs);
+  }
+
+  // Rows are always present ('–' when not applicable) so the panel never changes height.
+  function updateComp(c) {
+    const comp = $('infoComp');
+    const parts = $('infoParts');
+    const thr = $('infoThrow');
+    if (!c || !c.enabled) {
+      comp.textContent = '–';
+      parts.textContent = '–';
+      thr.textContent = '–';
+      return;
+    }
+    if (!c.result || !c.result.ok) {
+      comp.textContent = c.result ? 'Không giải được' : '…';
+      parts.textContent = '–';
+      thr.textContent = '–';
+      return;
+    }
+    const r = c.result;
+    comp.textContent = `${fmtDeg(Math.abs(r.correctionDeg), 2)} ${r.correctionDeg >= 0 ? 'phải' : 'trái'}`;
+    // cue-ball deviation (squirt · swerve) and object-ball throw are shown apart; the aim correction above is the combined result
+    parts.textContent = `${fmtSigned(r.parts.squirt)} · ${fmtSigned(r.parts.swerve)}`;
+    thr.textContent = fmtSigned(r.parts.throw);
+  }
+
+  // The warning slot keeps a reserved height; toggling content must not shift the layout.
+  function setWarn(el, msgs) {
+    el.classList.toggle('empty', msgs.length === 0);
+    el.textContent = msgs.length ? msgs.join('. ') : ' ';
+  }
+
+  function syncControls({ power, aimOffset, tip, elevation, comp, elevationLocked, compLocked }) {
+    $('elevation').value = elevation;
+    $('elevationVal').textContent = `${Math.round(elevation)}°`;
+    $('elevation').disabled = !!elevationLocked;
+    $('chkComp').checked = !!comp;
+    $('chkComp').disabled = !!compLocked;
+    $('power').value = Math.round(power * 100);
+    $('powerVal').textContent = `${Math.round(power * 100)}%`;
+    $('aimOffset').value = aimOffset;
+    $('aimOffsetVal').textContent = fmtDeg(aimOffset);
+    $('spinLabel').textContent = tipText(tip);
+  }
+
+  function updateStats(stats) {
+    const t = stats.thickness;
+    const pct = t.rounds ? Math.round((100 * t.correct) / t.rounds) : 0;
+    $('thickStats').textContent = `Đúng ${t.correct}/${t.rounds} (${pct}%) · Chuỗi ${t.streak} · Tốt nhất ${t.best}`;
+    const p = stats.position;
+    $('posStats').textContent = `Thành công ${p.success}/${p.attempts} · Chuỗi ${p.streak} · Tốt nhất ${p.best}`;
+    const q = stats.squirt;
+    $('squirtStats').textContent = `Vào lỗ ${q.success}/${q.attempts} · Chuỗi ${q.streak} · Tốt nhất ${q.best}`;
+  }
+
+  function setActiveTab(mode) {
+    document.body.dataset.mode = mode;
+    for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('active', b.dataset.mode === mode);
+  }
+
+  function resetThickness() {
+    $('thickResult').textContent = '';
+    $('btnNextThick').disabled = true;
+    for (const b of $('thickChoices').children) {
+      b.className = 'btn';
+      b.disabled = false;
+    }
+  }
+
+  function showThickAnswer(res, label) {
+    const cut = res.cutAngleDeg.toFixed(1).replace('.', ',');
+    $('thickResult').textContent = res.correct
+      ? `Đúng! Độ dày ${res.truth} (${res.fullnessPct}%), góc cắt ${cut}°`
+      : `Sai. Đáp án: ${res.truth} (${res.fullnessPct}%), góc cắt ${cut}°`;
+    for (const b of $('thickChoices').children) {
+      b.disabled = true;
+      if (b.dataset.label === res.truth) b.classList.add('right');
+      else if (b.dataset.label === label) b.classList.add('wrong');
+    }
+  }
+
+  return {
+    spinPad,
+    toast,
+    refreshTray,
+    updateInfo,
+    syncControls,
+    updateStats,
+    setActiveTab,
+    resetThickness,
+    showThickAnswer,
+    setNextThick: (enabled) => {
+      $('btnNextThick').disabled = !enabled;
+    },
+    setPosResult: (t) => {
+      $('posResult').textContent = t;
+    },
+    setSquirtResult: (t) => {
+      $('squirtResult').textContent = t;
+    },
+    setSquirtTitle: (html) => {
+      $('squirtTitle').innerHTML = html;
+    },
+    /** mode: 'auto' | 'manual'; label = text for the angle readout. */
+    setAimMode: (mode, label) => {
+      const b = $('btnAimMode');
+      b.textContent = mode === 'manual' ? 'Ngắm: Tự do' : 'Ngắm: Tự động';
+      b.setAttribute('aria-pressed', String(mode === 'manual'));
+      $('aimOffset').disabled = mode === 'manual';
+      $('aimAngleVal').textContent = label;
+    },
+    setButtons: ({ shoot, reset }) => {
+      $('btnShoot').disabled = !shoot;
+      $('btnReset').disabled = !reset;
+    },
+    resize: () => spinPad.resize(),
+  };
+}

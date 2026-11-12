@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="theme-color" content="#0b6e4f">
+  <meta name="description" content="Ứng dụng tập luyện bida 9 bi: ngắm bi ma, góc cắt, độ dày, dự đoán đường đi.">
+  <title>Bida 9 bi – Tập luyện</title>
+  <link rel="manifest" href="assets/manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-mode="free">
+  <header class="top">
+    <h1>Bida 9 bi</h1>
+    <button type="button" id="equipChip" class="equip-chip" aria-haspopup="dialog" aria-controls="sheet" title="Chọn bàn và gậy">
+      <span id="equipChipText">Bàn · Gậy</span>
+    </button>
+    <nav class="tabs" id="tabs" aria-label="Chế độ">
+      <button type="button" data-mode="free" class="active">Tự do</button>
+      <button type="button" data-mode="thickness">Đoán độ dày</button>
+      <button type="button" data-mode="position">Điều bi cái</button>
+      <button type="button" data-mode="squirt">Bù squirt</button>
+    </nav>
+  </header>
+
+  <main class="layout">
+    <section class="stage" id="stage">
+      <canvas id="table" aria-label="Bàn bida"></canvas>
+      <canvas id="table3d" aria-label="Bàn bida 3D – góc nhìn mắt cơ thủ" hidden></canvas>
+      <canvas id="minimap" class="minimap" title="Chạm để về góc nhìn 2D" aria-label="Bản đồ bàn – chạm để về 2D" hidden></canvas>
+      <div class="view-ctl">
+        <div class="seg-mini" role="group" aria-label="Góc nhìn">
+          <span class="seg-label">Góc nhìn</span>
+          <button type="button" data-view="2d" aria-pressed="true" title="Góc nhìn 2D (phím V)">2D</button>
+          <button type="button" data-view="3d" aria-pressed="false" title="Góc nhìn 3D Mắt cơ thủ (phím V)">3D</button>
+        </div>
+        <div class="v3-opts" id="v3opts" hidden>
+          <div class="seg-mini" role="group" aria-label="Camera">
+            <span class="seg-label">Camera</span>
+            <button type="button" data-cam="auto" aria-pressed="true" title="Trên cao khi bi chạy, về sau bi cái khi bi dừng (phím K)">Tự động</button>
+            <button type="button" data-cam="fixed" aria-pressed="false" title="Giữ góc nhìn lúc đánh (phím K)">Cố định</button>
+            <button type="button" data-cam="follow" aria-pressed="false" title="Bám theo bi cái (phím K)">Theo bi cái</button>
+          </div>
+          <div class="seg-mini" role="group" aria-label="Chất lượng 3D">
+            <span class="seg-label">Chất lượng 3D</span>
+            <button type="button" data-q3d="high" aria-pressed="true">Cao</button>
+            <button type="button" data-q3d="low" aria-pressed="false">Thấp</button>
+          </div>
+        </div>
+      </div>
+      <div class="v3-load" id="v3load" role="status" hidden>Đang tải 3D…</div>
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    </section>
+
+    <section class="side">
+      <!-- Chế độ Đoán độ dày -->
+      <div class="drill only-thick" id="drillThick">
+        <div class="drill-title">Bi mục tiêu đi vào lỗ đã chọn. Bạn ngắm <b>độ dày</b> nào?</div>
+        <div class="choices" id="thickChoices"></div>
+        <div class="drill-result" id="thickResult" aria-live="polite"></div>
+        <div class="drill-row">
+          <span class="stats" id="thickStats"></span>
+          <button type="button" id="btnNextThick" class="btn" disabled>Câu tiếp</button>
+        </div>
+      </div>
+
+      <!-- Chế độ Điều bi cái -->
+      <div class="drill only-pos" id="drillPos">
+        <div class="drill-title">Đánh bi vào lỗ và để bi cái dừng trong <b>vòng vàng</b>.</div>
+        <div class="drill-result" id="posResult" aria-live="polite"></div>
+        <div class="drill-row">
+          <span class="stats" id="posStats"></span>
+          <button type="button" id="btnHint" class="btn">Gợi ý</button>
+          <button type="button" id="btnNextPos" class="btn">Bài mới</button>
+        </div>
+      </div>
+
+      <!-- Chế độ Bù squirt -->
+      <div class="drill only-squirt" id="drillSquirt">
+        <div class="drill-title" id="squirtTitle">Đánh với effet và chỉnh <b>Lệch ngắm</b> để bù squirt của gậy.</div>
+        <div class="drill-result" id="squirtResult" aria-live="polite"></div>
+        <div class="drill-row">
+          <span class="stats" id="squirtStats"></span>
+          <button type="button" id="btnHintSquirt" class="btn">Gợi ý</button>
+          <button type="button" id="btnNextSquirt" class="btn">Bài mới</button>
+        </div>
+      </div>
+
+      <div class="quickbar hide-thick">
+        <label class="power" for="power">
+          <span>Lực</span>
+          <input type="range" id="power" min="0" max="100" step="1" value="50">
+          <output id="powerVal">50%</output>
+        </label>
+        <button type="button" id="btnShoot" class="btn primary">Đánh</button>
+      </div>
+
+      <div class="aimbar hide-thick" id="aimbar" role="group" aria-label="Chỉnh hướng ngắm">
+        <button type="button" id="btnAimMode" class="btn aim-mode hide-squirt" aria-pressed="false" title="Chuyển kiểu ngắm">Ngắm: Tự động</button>
+        <button type="button" class="btn nudge" data-nudge="-1" aria-label="Xoay trái 1 độ">◀◀</button>
+        <button type="button" class="btn nudge" data-nudge="-0.1" aria-label="Xoay trái 0,1 độ">◀</button>
+        <output id="aimAngleVal" class="aim-angle" aria-live="off">0,0°</output>
+        <button type="button" class="btn nudge" data-nudge="0.1" aria-label="Xoay phải 0,1 độ">▶</button>
+        <button type="button" class="btn nudge" data-nudge="1" aria-label="Xoay phải 1 độ">▶▶</button>
+      </div>
+
+      <button type="button" id="panelToggle" class="panel-toggle" aria-expanded="false" aria-controls="panel">
+        <span id="panelToggleText">Mở bảng điều khiển</span>
+      </button>
+
+      <div class="panel" id="panel">
+        <section class="card">
+          <h2>Thông tin cú đánh</h2>
+          <dl class="info">
+            <dt>Góc cắt</dt><dd id="infoCut">–</dd>
+            <dt>Độ dày</dt><dd id="infoFull">–</dd>
+            <dt>Bi cái – bi mục tiêu</dt><dd id="infoDistCue">–</dd>
+            <dt>Bi mục tiêu – lỗ</dt><dd id="infoDistPocket">–</dd>
+            <dt>Tốc độ bi cái</dt><dd id="infoSpeed">–</dd>
+            <dt id="dtSquirt">Bù squirt</dt><dd id="infoSquirt">–</dd>
+            <dt id="dtComp" title="Góc xoay đường ngắm so với đường bi ma: là kết quả tổng hợp, không phải tổng cộng các góc bên dưới">Ngắm bù effet</dt><dd id="infoComp">–</dd>
+            <dt id="dtParts" title="Góc lệch của bi cái do squirt và cong (swerve); + = lệch sang phải hướng bi đi">Lệch bi cái (squirt · cong)</dt><dd id="infoParts">–</dd>
+            <dt id="dtThrow" title="Góc hướng bi mục tiêu lệch so với đường nối tâm hai bi lúc chạm; + = lệch sang phải hướng bi đi">Throw bi mục tiêu</dt><dd id="infoThrow">–</dd>
+          </dl>
+          <p class="hint" id="infoCompHint">Ngắm bù là kết quả tổng hợp, không phải tổng cộng các góc.</p>
+          <p class="warn empty" id="infoWarn" aria-live="polite">&nbsp;</p>
+        </section>
+
+        <section class="card hide-thick">
+          <h2>Điều khiển</h2>
+          <div class="controls">
+            <div class="spin-wrap">
+              <canvas id="spin" class="spin" aria-label="Điểm chạm trên bi cái"></canvas>
+              <div class="spin-label" id="spinLabel">Giữa (bi dừng)</div>
+              <div class="hint">Chạm đúp để về giữa</div>
+            </div>
+            <div class="sliders">
+              <label class="aim" for="aimOffset">
+                <span>Lệch ngắm</span>
+                <input type="range" id="aimOffset" min="-5" max="5" step="0.1" value="0">
+                <output id="aimOffsetVal">0,0°</output>
+              </label>
+              <label class="aim" for="elevation" title="Độ nâng đuôi cơ: kết hợp effet sẽ làm bi cái cong (swerve)">
+                <span>Nâng cơ</span>
+                <input type="range" id="elevation" min="0" max="30" step="1" value="5">
+                <output id="elevationVal">5°</output>
+              </label>
+              <label class="comp" for="chkComp" title="Tự động bù squirt + cong + throw khi ngắm">
+                <input type="checkbox" id="chkComp" checked>
+                <span>Tự bù effet</span>
+              </label>
+              <div class="btn-grid">
+                <button type="button" id="btnReset" class="btn">Đặt lại</button>
+                <button type="button" id="btnRandom" class="btn only-free-inline">Ngẫu nhiên</button>
+                <button type="button" id="btnRack" class="btn only-free-inline">Xếp 9 bi</button>
+                <button type="button" id="btnShare" class="btn only-free-inline">Chia sẻ</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card hide-thick">
+          <h2>Hiển thị</h2>
+          <div class="toggles">
+            <label><input type="checkbox" data-ov="aim" checked> Đường ngắm</label>
+            <label><input type="checkbox" data-ov="actual" checked> Đường bi cái thực tế</label>
+            <label><input type="checkbox" data-ov="ghost" checked> Bi ma</label>
+            <label><input type="checkbox" data-ov="pocket" checked> Đường vào lỗ</label>
+            <label><input type="checkbox" data-ov="tangent" checked> Tiếp tuyến 90°</label>
+            <label><input type="checkbox" data-ov="roll"> Đường lăn ~30° (xấp xỉ)</label>
+            <label class="hide-pos"><input type="checkbox" data-ov="predict" checked> Dự đoán đường đi</label>
+          </div>
+        </section>
+
+        <section class="card only-free">
+          <h2>Bi trên bàn</h2>
+          <div class="tray" id="tray" role="group" aria-label="Bi trên bàn"></div>
+          <p class="hint">Kéo bi để di chuyển. Chạm bi để chọn mục tiêu, chạm lỗ để chọn lỗ (mặc định: tự chọn).</p>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <!-- Thiết bị: chọn bàn + gậy (nội dung dựng bằng src/ui/settings.js) -->
+  <div id="sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" id="sheetBackdrop"></div>
+    <div class="sheet-box" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+      <div class="sheet-head">
+        <h2 id="sheetTitle">Thiết bị</h2>
+        <button type="button" id="sheetClose" class="btn sheet-close" aria-label="Đóng">Xong</button>
+      </div>
+      <div class="sheet-tabs" role="tablist">
+        <button type="button" role="tab" id="tabTable" data-tab="table" aria-selected="true">Bàn</button>
+        <button type="button" role="tab" id="tabCue" data-tab="cue" aria-selected="false">Gậy</button>
+      </div>
+      <div class="sheet-body" id="sheetBody"></div>
+    </div>
+  </div>
+
+  <script type="module" src="src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+* text=auto eol=lf
+assets/vendor/** -diff linguist-vendored
