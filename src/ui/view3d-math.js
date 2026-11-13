@@ -291,15 +291,7 @@ export function cushionFrames(segments) {
   });
 }
 
-/**
- * Outline of the opening in the wood rail top: the playing area + cushions rectangle (inset mm beyond the
- * cushion nose line) united with the pocket circles [{cx, cy, r}]. Returns points {x,y} (physics mm).
- */
-export function railHoleOutline({ W, H, inset = 36, circles = [], step = 3 }) {
-  const x0 = -inset;
-  const x1 = W + inset;
-  const y0 = -inset;
-  const y1 = H + inset;
+function rectCircleBooleanOutline({ x0, y0, x1, y1, circles = [], step = 3, keepOutside = true }) {
   const pts = [];
   const edge = (ax, ay, bx, by) => {
     const n = Math.max(1, Math.ceil(Math.hypot(bx - ax, by - ay) / step));
@@ -314,6 +306,7 @@ export function railHoleOutline({ W, H, inset = 36, circles = [], step = 3 }) {
   if (start < 0) return pts;
   const n = pts.length;
   const outsideRect = (p) => p.x < x0 - 1e-6 || p.x > x1 + 1e-6 || p.y < y0 - 1e-6 || p.y > y1 + 1e-6;
+  const insideRect = (p) => p.x > x0 + 1e-6 && p.x < x1 - 1e-6 && p.y > y0 + 1e-6 && p.y < y1 - 1e-6;
   const crossing = (pin, pout, c) => {
     let a = pin;
     let b = pout;
@@ -350,7 +343,10 @@ export function railHoleOutline({ W, H, inset = 36, circles = [], step = 3 }) {
     if (d1 < 0) d1 += 2 * Math.PI;
     const d2 = d1 - 2 * Math.PI;
     const mid = (d) => ({ x: c.cx + c.r * Math.cos(aX + d / 2), y: c.cy + c.r * Math.sin(aX + d / 2) });
-    const sweep = outsideRect(mid(d1)) || !outsideRect(mid(d2)) ? d1 : d2;
+    const ok = keepOutside
+      ? outsideRect(mid(d1)) || !outsideRect(mid(d2))
+      : insideRect(mid(d1)) || !insideRect(mid(d2));
+    const sweep = ok ? d1 : d2;
     const segs = Math.max(2, Math.ceil((Math.abs(sweep) * c.r) / step));
     out.push(X);
     for (let i = 1; i < segs; i++) {
@@ -361,6 +357,126 @@ export function railHoleOutline({ W, H, inset = 36, circles = [], step = 3 }) {
     k = j;
   }
   return out;
+}
+
+/**
+ * Outline of the opening in the wood rail top: the playing area + cushions rectangle (inset mm beyond the
+ * cushion nose line) united with the pocket circles [{cx, cy, r}]. Returns points {x,y} (physics mm).
+ */
+export function railHoleOutline({ W, H, inset = 36, circles = [], step = 3 }) {
+  return rectCircleBooleanOutline({ x0: -inset, y0: -inset, x1: W + inset, y1: H + inset, circles, step, keepOutside: true });
+}
+
+/**
+ * Outline of the playing cloth surface [0..W] x [0..H] with the pocket circles subtracted,
+ * so potted balls visually drop into open pocket wells instead of clipping through solid cloth.
+ */
+export function clothCutoutOutline({ W, H, circles = [], step = 3 }) {
+  return rectCircleBooleanOutline({ x0: 0, y0: 0, x1: W, y1: H, circles, step, keepOutside: false });
+}
+
+/** Walk arc on circle (cx, cy, r) from pStart to pEnd picking the front (dot(axis) > 0) or back arc. */
+function pocketArcPoints(pk, pStart, pEnd, frontSide, step = 3) {
+  const a0 = Math.atan2(pStart.y - pk.cy, pStart.x - pk.cx);
+  const a1 = Math.atan2(pEnd.y - pk.cy, pEnd.x - pk.cx);
+  let d1 = (a1 - a0) % (2 * Math.PI);
+  if (d1 < 0) d1 += 2 * Math.PI;
+  const d2 = d1 - 2 * Math.PI;
+  const mid1 = { x: Math.cos(a0 + d1 / 2), y: Math.sin(a0 + d1 / 2) };
+  const isFront1 = mid1.x * pk.axis.x + mid1.y * pk.axis.y > 0;
+  const sweep = frontSide ? (isFront1 ? d1 : d2) : isFront1 ? d2 : d1;
+  const segs = Math.max(4, Math.ceil((Math.abs(sweep) * pk.dropR) / step));
+  const out = [{ x: pStart.x, y: pStart.y }];
+  for (let i = 1; i < segs; i++) {
+    const a = a0 + (sweep * i) / segs;
+    out.push({ x: pk.cx + pk.dropR * Math.cos(a), y: pk.cy + pk.dropR * Math.sin(a) });
+  }
+  out.push({ x: pEnd.x, y: pEnd.y });
+  return out;
+}
+
+/** Intersect segment a->b with axis-aligned box [x0..x1] x [y0..y1]; returns exit parameter t in [0,1] or null. */
+function segmentExitBox(a, b, x0, y0, x1, y1) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const ts = [];
+  if (Math.abs(dx) > 1e-9) {
+    for (const bx of [x0, x1]) {
+      const t = (bx - a.x) / dx;
+      if (t >= -1e-6 && t <= 1 + 1e-6) ts.push(t);
+    }
+  }
+  if (Math.abs(dy) > 1e-9) {
+    for (const by of [y0, y1]) {
+      const t = (by - a.y) / dy;
+      if (t >= -1e-6 && t <= 1 + 1e-6) ts.push(t);
+    }
+  }
+  let best = null;
+  for (const t of ts) {
+    const tc = clamp(t, 0, 1);
+    const px = a.x + dx * tc;
+    const py = a.y + dy * tc;
+    if (px >= x0 - 1e-4 && px <= x1 + 1e-4 && py >= y0 - 1e-4 && py <= y1 + 1e-4) {
+      if (best === null || tc > best.t) best = { t: tc, x: px, y: py };
+    }
+  }
+  return best;
+}
+
+/** Order the two jaws of a pocket clockwise around the rect perimeter (corner/top-right-bottom-left). */
+function orderedPocketJaws(pk, W, H) {
+  // Walk perimeter of [0..W] x [0..H]: top(0), right(1), bottom(2), left(3)
+  const param = (p) => {
+    const eps = 1e-3;
+    if (Math.abs(p.y) < eps) return p.x;
+    if (Math.abs(p.x - W) < eps) return W + p.y;
+    if (Math.abs(p.y - H) < eps) return W + H + (W - p.x);
+    return W + H + W + (H - p.y);
+  };
+  const perim = 2 * (W + H);
+  const p0 = param(pk.jaws[0].a);
+  const p1 = param(pk.jaws[1].a);
+  let d = (p1 - p0) % perim;
+  if (d < 0) d += perim;
+  return d < perim / 2 ? [pk.jaws[0], pk.jaws[1]] : [pk.jaws[1], pk.jaws[0]];
+}
+
+/**
+ * Closed outline of the wood rail opening matching both the beveled cushion jaws (at offset `inset`)
+ * and the circular pocket wells behind them. Used by 3D wood rail extrusion.
+ */
+export function tableOpeningOutline({ W, H, inset = 36, pockets = [], step = 3 }) {
+  if (!pockets.length) return railHoleOutline({ W, H, inset, circles: [], step });
+  // Pockets sorted in clockwise perimeter order starting from top-left corner:
+  // top-left corner(0), top-side(4), top-right(1), bottom-right(3), bottom-side(5), bottom-left(2)
+  const order = [0, 4, 1, 3, 5, 2].map((id) => pockets.find((p) => p.id === id)).filter(Boolean);
+  const pts = [];
+  for (const pk of order) {
+    const [jIn, jOut] = orderedPocketJaws(pk, W, H);
+    const eIn = segmentExitBox(jIn.a, jIn.b, -inset, -inset, W + inset, H + inset) || { x: jIn.a.x, y: jIn.a.y };
+    const eOut = segmentExitBox(jOut.a, jOut.b, -inset, -inset, W + inset, H + inset) || { x: jOut.a.x, y: jOut.a.y };
+    pts.push({ x: eIn.x, y: eIn.y });
+    pts.push(...pocketArcPoints(pk, jIn.b, jOut.b, false, step));
+    pts.push({ x: eOut.x, y: eOut.y });
+  }
+  return pts;
+}
+
+/**
+ * Closed outline of the playing cloth bed + tapered pocket throat shelves up to each circular drop rim.
+ */
+export function clothBedOutline({ W, H, pockets = [], step = 3 }) {
+  if (!pockets.length) return clothCutoutOutline({ W, H, circles: [], step });
+  const order = [0, 4, 1, 3, 5, 2].map((id) => pockets.find((p) => p.id === id)).filter(Boolean);
+  const pts = [];
+  for (const pk of order) {
+    const [jIn, jOut] = orderedPocketJaws(pk, W, H);
+    pts.push({ x: jIn.a.x, y: jIn.a.y });
+    pts.push(...pocketArcPoints(pk, jIn.b, jOut.b, true, step));
+    pts.push({ x: jOut.a.x, y: jOut.a.y });
+  }
+  return pts;
 }
 
 /* ------------------------------------------------------------------ paths -> 3D polylines */

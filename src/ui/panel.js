@@ -3,6 +3,7 @@
 import { createSpinPad } from './input.js';
 import { BALL_COLORS } from './render.js';
 import { FULLNESS_LABELS } from '../core/geometry.js';
+import { BOT_DIFFICULTIES, BOT_GAMES } from '../features/bot.js';
 
 const $ = (id) => document.getElementById(id);
 export const fmtDeg = (d, digits = 1) => `${Number(d).toFixed(digits).replace('.', ',')}°`;
@@ -90,6 +91,84 @@ export function createPanel(h) {
     cb.addEventListener('change', () => h.onOverlay(cb.dataset.ov, cb.checked));
   }
   for (const b of document.querySelectorAll('#tabs button')) b.addEventListener('click', () => h.onMode(b.dataset.mode));
+  for (const b of document.querySelectorAll('#mainModes button')) {
+    b.addEventListener('click', () => h.onAppMode?.(b.dataset.app));
+  }
+
+  const syncLobbyDesc = (diff) => {
+    const info = BOT_DIFFICULTIES[diff] || BOT_DIFFICULTIES.medium;
+    if ($('lobbyDiffDesc')) $('lobbyDiffDesc').textContent = info.desc;
+  };
+  let lobbyDiff = $('botDiff') ? $('botDiff').value : 'medium';
+  let lobbyGame = $('botGame') ? $('botGame').value : '9ball';
+  syncLobbyDesc(lobbyDiff);
+  for (const b of document.querySelectorAll('#lobbyGame button')) {
+    b.addEventListener('click', () => {
+      lobbyGame = b.dataset.game;
+      for (const x of document.querySelectorAll('#lobbyGame button')) {
+        x.classList.toggle('active', x.dataset.game === lobbyGame);
+      }
+      if ($('botGame')) $('botGame').value = lobbyGame;
+    });
+  }
+  for (const b of document.querySelectorAll('#lobbyDiff button')) {
+    b.addEventListener('click', () => {
+      lobbyDiff = b.dataset.diff;
+      for (const x of document.querySelectorAll('#lobbyDiff button')) {
+        x.classList.toggle('active', x.dataset.diff === lobbyDiff);
+      }
+      if ($('botDiff')) $('botDiff').value = lobbyDiff;
+      syncLobbyDesc(lobbyDiff);
+    });
+  }
+  let lobbyBvbGame = '9ball';
+  for (const b of document.querySelectorAll('#lobbyBvbGame button')) {
+    b.addEventListener('click', () => {
+      lobbyBvbGame = b.dataset.game;
+      for (const x of document.querySelectorAll('#lobbyBvbGame button')) {
+        x.classList.toggle('active', x.dataset.game === lobbyBvbGame);
+      }
+    });
+  }
+  $('btnStartBot')?.addEventListener('click', () => h.onStartBot?.(lobbyDiff, lobbyGame));
+  $('btnStartBvb')?.addEventListener('click', () => {
+    const name1 = $('bvbName1')?.value?.trim() || 'Alpha';
+    const name2 = $('bvbName2')?.value?.trim() || 'Beta';
+    const diff1 = $('bvbDiff1')?.value || 'hard';
+    const diff2 = $('bvbDiff2')?.value || 'pro';
+    h.onStartBvb?.({ name1, name2, diff1, diff2, game: lobbyBvbGame });
+  });
+  $('btnStartPractice')?.addEventListener('click', () => h.onStartPractice?.());
+  $('botDiff')?.addEventListener('change', (e) => h.onBotDifficulty?.(e.target.value));
+  $('botGame')?.addEventListener('change', (e) => h.onBotGame?.(e.target.value));
+  $('btnNewMatch')?.addEventListener('click', () => h.onNewMatch?.());
+
+  // BvB in-game controls
+  $('btnBvbPause')?.addEventListener('click', () => h.onBvbPause?.());
+  $('btnBvbSpeed')?.addEventListener('click', () => h.onBvbSpeed?.());
+
+  const openRename = () => {
+    const modal = $('renameModal');
+    if (!modal) return;
+    if ($('renameInput1')) $('renameInput1').value = currentBot1Name;
+    if ($('renameInput2')) $('renameInput2').value = currentBot2Name;
+    modal.hidden = false;
+    $('renameInput1')?.focus();
+  };
+  const closeRename = () => {
+    const modal = $('renameModal');
+    if (modal) modal.hidden = true;
+  };
+  $('btnBvbRename')?.addEventListener('click', openRename);
+  $('botName1')?.addEventListener('click', openRename);
+  $('botName2')?.addEventListener('click', openRename);
+  $('btnCancelRename')?.addEventListener('click', closeRename);
+  $('btnSaveRename')?.addEventListener('click', () => {
+    const name1 = $('renameInput1')?.value?.trim() || 'Alpha';
+    const name2 = $('renameInput2')?.value?.trim() || 'Beta';
+    closeRename();
+    h.onBvbRename?.({ name1, name2 });
+  });
 
   // thickness choices
   for (const label of FULLNESS_LABELS) {
@@ -188,7 +267,7 @@ export function createPanel(h) {
       return;
     }
     if (!c.result || !c.result.ok) {
-      comp.textContent = c.result ? 'Không giải được' : '…';
+      comp.textContent = !c.result ? '…' : c.result.reason === 'miscue' ? 'Trượt cơ' : 'Không giải được';
       parts.textContent = '–';
       thr.textContent = '–';
       return;
@@ -206,12 +285,13 @@ export function createPanel(h) {
     el.textContent = msgs.length ? msgs.join('. ') : ' ';
   }
 
-  function syncControls({ power, aimOffset, tip, elevation, comp, elevationLocked, compLocked }) {
+  function syncControls({ power, aimOffset, tip, elevation, comp, elevationLocked, compLocked, tipLocked }) {
     $('elevation').value = elevation;
     $('elevationVal').textContent = `${Math.round(elevation)}°`;
     $('elevation').disabled = !!elevationLocked;
     $('chkComp').checked = !!comp;
     $('chkComp').disabled = !!compLocked;
+    spinPad.setLocked(!!tipLocked);
     $('power').value = Math.round(power * 100);
     $('powerVal').textContent = `${Math.round(power * 100)}%`;
     $('aimOffset').value = aimOffset;
@@ -232,6 +312,106 @@ export function createPanel(h) {
   function setActiveTab(mode) {
     document.body.dataset.mode = mode;
     for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('active', b.dataset.mode === mode);
+  }
+
+  function setAppMode(appMode) {
+    document.body.dataset.app = appMode;
+    for (const b of document.querySelectorAll('#mainModes button')) b.classList.toggle('active', b.dataset.app === appMode);
+  }
+
+  function setLobbyOpen(open) {
+    const el = $('lobby');
+    if (el) el.hidden = !open;
+  }
+
+  let currentBot1Name = 'Alpha';
+  let currentBot2Name = 'Beta';
+  function setBotHud({
+    matchType = 'pve',
+    bot1Name = 'Bạn',
+    bot2Name = 'Bot',
+    bot1Diff,
+    bot2Diff,
+    paused = false,
+    speed = 1,
+    scorePlayer,
+    scoreBot,
+    turn,
+    game = '9ball',
+    difficulty,
+    targetId,
+    targetLabel,
+    statusText,
+    isFoul,
+    thinking,
+  }) {
+    currentBot1Name = bot1Name;
+    currentBot2Name = bot2Name;
+    if ($('botScorePlayer')) $('botScorePlayer').textContent = String(scorePlayer);
+    if ($('botScoreBot')) $('botScoreBot').textContent = String(scoreBot);
+    if ($('botGame') && game) $('botGame').value = game;
+    if ($('botDiff') && difficulty) $('botDiff').value = difficulty;
+
+    const isBvb = matchType === 'bvb';
+    const gameLabel = (BOT_GAMES[game] || BOT_GAMES['9ball']).label;
+
+    if ($('bvbControls')) $('bvbControls').hidden = !isBvb;
+    if ($('botDiffWrap')) $('botDiffWrap').hidden = isBvb;
+
+    if (isBvb) {
+      const d1 = BOT_DIFFICULTIES[bot1Diff] || BOT_DIFFICULTIES.hard;
+      const d2 = BOT_DIFFICULTIES[bot2Diff] || BOT_DIFFICULTIES.pro;
+      if ($('botName1')) {
+        $('botName1').textContent = `${bot1Name} (${d1.shortLabel || d1.label})`;
+        $('botName1').classList.add('editable-name');
+      }
+      if ($('botName2')) {
+        $('botName2').textContent = `${bot2Name} (${d2.shortLabel || d2.label})`;
+        $('botName2').classList.add('editable-name');
+      }
+      const tp = $('botTurnPill');
+      if (tp) {
+        const currentShooter = turn === 'bot1' ? bot1Name : bot2Name;
+        tp.textContent = thinking ? `🤖 ${currentShooter} đang ngắm...` : `🤖 Lượt ${currentShooter}`;
+        tp.className = `pill ${isFoul ? 'is-foul' : 'is-bot-turn'}`.trim();
+      }
+      if ($('btnBvbPause')) {
+        $('btnBvbPause').textContent = paused ? '▶ Tiếp tục' : '⏸ Tạm dừng';
+      }
+      if ($('btnBvbSpeed')) {
+        $('btnBvbSpeed').textContent = speed === 2 ? '⚡ 2x' : '⚡ 1x';
+      }
+    } else {
+      const diffInfo = BOT_DIFFICULTIES[difficulty] || BOT_DIFFICULTIES.medium;
+      if ($('botName1')) {
+        $('botName1').textContent = 'Bạn';
+        $('botName1').classList.remove('editable-name');
+      }
+      if ($('botName2')) {
+        $('botName2').textContent = `Bot ${gameLabel} (${diffInfo.shortLabel || diffInfo.label})`;
+        $('botName2').classList.remove('editable-name');
+      }
+      const tp = $('botTurnPill');
+      if (tp) {
+        tp.textContent = turn === 'bot' ? (thinking ? '🤖 Bot đang ngắm...' : '🤖 Lượt Bot') : 'Lượt bạn';
+        tp.className = `pill ${turn === 'bot' ? 'is-bot-turn' : isFoul ? 'is-foul' : ''}`.trim();
+      }
+    }
+
+    if ($('lobbyDiffDesc')) {
+      const diffInfo = BOT_DIFFICULTIES[difficulty] || BOT_DIFFICULTIES.medium;
+      $('lobbyDiffDesc').textContent = diffInfo.desc;
+    }
+    if ($('botTargetPill')) {
+      $('botTargetPill').textContent = targetLabel || (targetId ? `Bi #${targetId}` : 'Hết bi');
+    }
+    if ($('botStatusText')) $('botStatusText').textContent = statusText || '';
+    for (const b of document.querySelectorAll('#lobbyGame button')) {
+      b.classList.toggle('active', b.dataset.game === game);
+    }
+    for (const b of document.querySelectorAll('#lobbyDiff button')) {
+      b.classList.toggle('active', b.dataset.diff === difficulty);
+    }
   }
 
   function resetThickness() {
@@ -255,14 +435,83 @@ export function createPanel(h) {
     }
   }
 
+  let lastPottedKey = null;
+  let lastDeadIds = [];
+  function setPottedBalls(data, visible = true) {
+    const el = $('pottedTray');
+    if (!el) return;
+    el.hidden = !visible;
+    if (!visible) return;
+    const rackIds = Array.isArray(data)
+      ? data
+      : data && Array.isArray(data.rackIds)
+        ? data.rackIds
+        : [];
+    const deadList = data && Array.isArray(data.deadIds) ? data.deadIds : [];
+    const scratch = !!(data && data.scratch);
+    const deadSet = new Set(deadList);
+    const deadSorted = [...deadSet].sort((a, b) => a - b);
+    const key = `${rackIds.join(',')}|${deadSorted.join(',')}|${scratch ? '1' : '0'}`;
+    if (key === lastPottedKey) return;
+    const prevDead = new Set(lastDeadIds);
+    lastPottedKey = key;
+    lastDeadIds = deadSorted;
+
+    const is15 = rackIds.length > 10;
+    el.classList.toggle('is-15', is15);
+    el.replaceChildren();
+
+    const aliveCount = rackIds.filter((id) => !deadSet.has(id)).length;
+    const label = document.createElement('span');
+    label.className = 'potted-label';
+    label.innerHTML = rackIds.length ? `Còn <strong>${aliveCount}</strong>/${rackIds.length}` : 'Trống';
+    el.appendChild(label);
+
+    for (const id of rackIds) {
+      const dead = deadSet.has(id);
+      const justDead = dead && !prevDead.has(id);
+      const b = document.createElement('span');
+      const sepClass = is15 && id === 8 ? ' is-eight-sep' : '';
+      b.className = `potted-ball${dead ? ' is-dead' : ''}${justDead ? ' just-dead' : ''}${id >= 10 ? ' is-two' : ''}${sepClass}`;
+      const col = BALL_COLORS[id] || '#888';
+      b.style.background = id >= 9
+        ? `linear-gradient(180deg, #f7f6ef 0 23%, ${col} 23% 77%, #f7f6ef 77%)`
+        : col;
+      b.title = dead ? `Bi #${id} (đã rơi lỗ)` : `Bi #${id} (trên bàn)`;
+      const num = document.createElement('span');
+      num.className = 'p-num';
+      num.textContent = String(id);
+      b.appendChild(num);
+      el.appendChild(b);
+    }
+
+    if (scratch) {
+      const s = document.createElement('span');
+      s.className = 'potted-ball is-scratch-pill';
+      s.textContent = 'Scratch';
+      s.title = 'Bi cái rơi lỗ';
+      el.appendChild(s);
+    }
+  }
+
   return {
     spinPad,
     toast,
     refreshTray,
+    setPottedBalls,
     updateInfo,
     syncControls,
     updateStats,
     setActiveTab,
+    setAppMode,
+    setLobbyOpen,
+    setBotHud,
+    setTurnLocked: (locked) => {
+      $('power').disabled = !!locked;
+      $('btnAimMode').disabled = !!locked;
+      for (const b of document.querySelectorAll('[data-nudge]')) b.disabled = !!locked;
+      spinPad.setLocked(!!locked);
+    },
     resetThickness,
     showThickAnswer,
     setNextThick: (enabled) => {

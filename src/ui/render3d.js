@@ -2,15 +2,17 @@
 // Scene layout: `root` (scaled 0.001, in physics millimetres: x -> three.x, y -> three.z, up -> three.y) holds the
 // table, balls and aids; the cue stick, hit marker, lights and camera live in metres (three world, table centred).
 import * as THREE from '../../assets/vendor/three/three.module.min.js';
-import { R } from '../core/table.js';
+import { R, railStripBevel } from '../core/table.js';
+import { cueVisualStyle } from '../core/equipment.js';
 import { BALL_COLORS } from './render.js';
 import { wheelPixels } from './keyboard.js';
 import {
   MM, RAIL_WIDTH_3D, CAM_DIST_DEFAULT, CAM_HEIGHT_DEFAULT, clampCamDist, clampCamHeight, cameraPose, topDownPose,
   fovForAspect, createCameraDirector, easeInOut, lerpAngle, smoothAlpha, physQuatToThree, cuePose, pullMm, strokePull,
-  cushionFrames, railHoleOutline, dashSegments, pathSegments, naturalRollIndex, ribbonQuads, ballTexturePixels,
+  cushionFrames, tableOpeningOutline, clothBedOutline, dashSegments, pathSegments, naturalRollIndex, ribbonQuads, ballTexturePixels,
   parseHex, dragToAimDeg, toThree, CAMERA_MODE_LABEL,
 } from './view3d-math.js';
+import { dropVisual } from './drop-anim.js';
 
 const TRANSITION_MS = 600;
 const STICK_LEN = 1470;
@@ -154,11 +156,6 @@ export async function createView3D(host) {
     g.clear();
   }
 
-  function pocketCircle(pk) {
-    const out = pk.type === 'corner' ? 20 : 16;
-    return { cx: pk.x - pk.axis.x * out, cy: pk.y - pk.axis.y * out, r: pk.type === 'corner' ? 0.44 * mouths.corner : 0.34 * mouths.side };
-  }
-
   function buildTable(geo) {
     disposeGroup(tableGroup);
     const { W, H } = geo;
@@ -175,15 +172,18 @@ export async function createView3D(host) {
       m.position.set(x, y, z);
       return add(m);
     };
-    // dark pit under pocket mouths
-    flat(new THREE.PlaneGeometry(W + 2 * IN, H + 2 * IN), new THREE.MeshBasicMaterial({ color: '#030504' }), W / 2, -1, H / 2);
-    // cloth
+    // dark pit floor well below the pocket cups
+    flat(new THREE.PlaneGeometry(W + 2 * IN, H + 2 * IN), new THREE.MeshBasicMaterial({ color: '#030504' }), W / 2, -92, H / 2);
+    // cloth with tapered pocket throat shelves up to each pocket well rim
+    const clothShape = new THREE.Shape();
+    const clothPts = clothBedOutline({ W, H, pockets: geo.POCKETS, step: 3 });
+    clothPts.forEach((p, i) => (i ? clothShape.lineTo(p.x, -p.y) : clothShape.moveTo(p.x, -p.y)));
+    clothShape.closePath();
     const clothMat = new THREE.MeshStandardMaterial({ color: '#0b6e4f', roughness: 0.92, metalness: 0, map: clothTex });
-    clothMat.map = clothTex;
-    clothTex.repeat.set(W / 250, H / 250);
-    const cloth = flat(new THREE.PlaneGeometry(W, H), clothMat, W / 2, 0, H / 2);
+    clothTex.repeat.set(1 / 250, 1 / 250);
+    const cloth = flat(new THREE.ShapeGeometry(clothShape), clothMat, 0, 0, 0);
     cloth.receiveShadow = true;
-    // cushions
+    // beveled cushions matching the exact pocket jaw facing angles
     const rubber = new THREE.MeshStandardMaterial({ color: '#0a5a41', roughness: 0.95 });
     const prof = new THREE.Shape();
     prof.moveTo(0, 0);
@@ -191,8 +191,25 @@ export async function createView3D(host) {
     prof.lineTo(IN, YR - 2);
     prof.lineTo(2, R + 3);
     prof.lineTo(0, R);
-    for (const f of cushionFrames(geo.RAIL_SEGMENTS)) {
-      const m = new THREE.Mesh(new THREE.ExtrudeGeometry(prof, { depth: f.len, bevelEnabled: false }), rubber);
+    const frames = cushionFrames(geo.RAIL_SEGMENTS);
+    geo.RAIL_SEGMENTS.forEach((seg, idx) => {
+      const f = frames[idx];
+      const frameSeg = {
+        a: f.origin,
+        b: { x: f.origin.x + f.e3.x * f.len, y: f.origin.y + f.e3.z * f.len },
+        n: seg.n,
+      };
+      const bev = railStripBevel(frameSeg, geo.JAWS, IN);
+      const geom = new THREE.ExtrudeGeometry(prof, { depth: f.len, bevelEnabled: false });
+      const pos = geom.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        const t = f.len > 0 ? z / f.len : 0;
+        pos.setZ(i, z + (1 - t) * (x * bev.slopeStart) + t * (x * bev.slopeEnd));
+      }
+      geom.computeVertexNormals();
+      const m = new THREE.Mesh(geom, rubber);
       const basis = new THREE.Matrix4().makeBasis(
         new THREE.Vector3(f.n3.x, f.n3.y, f.n3.z),
         new THREE.Vector3(0, 1, 0),
@@ -202,11 +219,58 @@ export async function createView3D(host) {
       basis.decompose(m.position, m.quaternion, m.scale);
       m.receiveShadow = true;
       add(m);
+    });
+    // 3D pocket wells, dark jaw facings, and leather pocket collars
+    const wellMat = new THREE.MeshStandardMaterial({ color: '#0d0f0f', roughness: 0.96, side: THREE.DoubleSide });
+    const pitMat = new THREE.MeshBasicMaterial({ color: '#030404' });
+    const leatherMat = new THREE.MeshStandardMaterial({ color: '#1b1d1e', roughness: 0.72, metalness: 0.08 });
+    for (const pk of geo.POCKETS) {
+      const well = new THREE.Mesh(new THREE.CylinderGeometry(pk.dropR, pk.dropR * 0.88, 90, 36, 1, true), wellMat);
+      well.position.set(pk.cx, -44.8, pk.cy);
+      add(well);
+      flat(new THREE.CircleGeometry(pk.dropR * 0.88, 28), pitMat, pk.cx, -89.8, pk.cy);
+      // outer pocket leather rim/hood casting around the back of the drop well
+      const [j0, j1] = pk.jaws;
+      const a0 = Math.atan2(-(j0.b.y - pk.cy), j0.b.x - pk.cx);
+      const a1 = Math.atan2(-(j1.b.y - pk.cy), j1.b.x - pk.cx);
+      let d1 = (a1 - a0) % (2 * Math.PI);
+      if (d1 < 0) d1 += 2 * Math.PI;
+      const d2 = d1 - 2 * Math.PI;
+      const midAngle = a0 + d1 / 2;
+      // shape coords use (x, -y), so table axis in shape plane is (pk.axis.x, -pk.axis.y)
+      const back1 = Math.cos(midAngle) * pk.axis.x + Math.sin(midAngle) * -pk.axis.y < 0;
+      const sweep = back1 ? d1 : d2;
+      const rIn = pk.dropR;
+      const rOut = pk.dropR + 10;
+      const collar = new THREE.Shape();
+      const segs = 24;
+      for (let i = 0; i <= segs; i++) {
+        const a = a0 + (sweep * i) / segs;
+        const x = pk.cx + rIn * Math.cos(a);
+        const y = -pk.cy + rIn * Math.sin(a);
+        i ? collar.lineTo(x, y) : collar.moveTo(x, y);
+      }
+      for (let i = segs; i >= 0; i--) {
+        const a = a0 + (sweep * i) / segs;
+        collar.lineTo(pk.cx + rOut * Math.cos(a), -pk.cy + rOut * Math.sin(a));
+      }
+      collar.closePath();
+      const hood = new THREE.Mesh(new THREE.ExtrudeGeometry(collar, { depth: YR + 1.5, bevelEnabled: false }), leatherMat);
+      hood.rotation.x = -Math.PI / 2;
+      hood.position.y = 0;
+      hood.receiveShadow = true;
+      add(hood);
     }
-    // pockets: dark discs at cloth level
-    const pitMat = new THREE.MeshBasicMaterial({ color: '#050606' });
-    const circles = geo.POCKETS.map(pocketCircle);
-    for (const c of circles) flat(new THREE.CircleGeometry(c.r, 40), pitMat, c.cx, 0.6, c.cy);
+    // subtle leather/rubber facing plates along the inner pocket jaws
+    for (const j of geo.JAWS) {
+      const fGeo = new THREE.BoxGeometry(j.len, R + 6, 2.2);
+      const fMesh = new THREE.Mesh(fGeo, leatherMat);
+      const mx = (j.a.x + j.b.x) / 2 - j.n.x * 0.8;
+      const my = (j.a.y + j.b.y) / 2 - j.n.y * 0.8;
+      fMesh.position.set(mx, (R + 6) / 2, my);
+      fMesh.rotation.y = -Math.atan2(j.b.y - j.a.y, j.b.x - j.a.x);
+      add(fMesh);
+    }
     // wood rail top with the opening (shape y = -physics y, then rotated flat)
     // outer rectangle in (x, -y): shape y' = -physics y
     const outer = new THREE.Shape();
@@ -216,7 +280,7 @@ export async function createView3D(host) {
     outer.lineTo(-RW, -(H + RW));
     outer.closePath();
     const hole = new THREE.Path();
-    const outline = railHoleOutline({ W, H, inset: IN, circles, step: 3 });
+    const outline = tableOpeningOutline({ W, H, inset: IN, pockets: geo.POCKETS, step: 3 });
     outline.forEach((p, i) => (i ? hole.lineTo(p.x, -p.y) : hole.moveTo(p.x, -p.y)));
     hole.closePath();
     outer.holes.push(hole);
@@ -284,7 +348,7 @@ export async function createView3D(host) {
     g.fillStyle = '#000';
     g.textAlign = 'center';
     g.textBaseline = 'middle';
-    g.font = '700 80px system-ui, "Segoe UI", sans-serif';
+    g.font = n >= 10 ? '700 66px system-ui, "Segoe UI", sans-serif' : '700 80px system-ui, "Segoe UI", sans-serif';
     g.fillText(String(n), S / 2, S / 2 + 4);
     const d = g.getImageData(0, 0, S, S).data;
     const alpha = new Uint8Array(S * S);
@@ -302,8 +366,8 @@ export async function createView3D(host) {
     const spec =
       id === 0
         ? { base: white, stripe: null, dots: true, number: false, glyph: null }
-        : id === 9
-          ? { base: white, stripe: parseHex(BALL_COLORS[9]), dots: false, number: true, glyph: glyph(9) }
+        : id >= 9
+          ? { base: white, stripe: parseHex(BALL_COLORS[id] || BALL_COLORS[9]), dots: false, number: true, glyph: glyph(id) }
           : { base: parseHex(BALL_COLORS[id] || '#888888'), stripe: null, dots: false, number: true, glyph: glyph(id) };
     const t = new THREE.DataTexture(ballTexturePixels(spec, w, h), w, h, THREE.RGBAFormat, THREE.UnsignedByteType);
     t.colorSpace = THREE.SRGBColorSpace;
@@ -346,10 +410,29 @@ export async function createView3D(host) {
       if (b.potted) continue;
       const m = ensureBall(b.id);
       m.visible = true;
+      m.material.transparent = false;
+      m.material.opacity = 1;
+      m.castShadow = true;
       m.position.set(b.pos.x, R, b.pos.y);
       const q = physQuatToThree(b.q || IDENT_Q);
       m.quaternion.set(q.x, q.y, q.z, q.w);
       seen.add(b.id);
+    }
+    if (sc.drops) {
+      for (const d of sc.drops) {
+        if (seen.has(d.id)) continue;
+        const { fade } = dropVisual(d);
+        if (fade <= 0.01) continue;
+        const m = ensureBall(d.id);
+        m.visible = true;
+        m.material.transparent = fade < 0.999;
+        m.material.opacity = fade;
+        m.castShadow = fade > 0.5;
+        m.position.set(d.x, R - d.z, d.y);
+        const q = physQuatToThree(d.q || IDENT_Q);
+        m.quaternion.set(q.x, q.y, q.z, q.w);
+        seen.add(d.id);
+      }
     }
     for (const [id, m] of balls) if (!seen.has(id)) m.visible = false;
   }
@@ -358,29 +441,41 @@ export async function createView3D(host) {
   const stick = new THREE.Group();
   stick.scale.setScalar(MM);
   scene.add(stick);
-  let stickTipD = 0;
+  let stickStyleKey = '';
   const marker = new THREE.Mesh(new THREE.SphereGeometry(0.0021, 12, 8), new THREE.MeshBasicMaterial({ color: '#ff3b30' }));
   marker.visible = false;
   scene.add(marker);
 
-  function buildStick(tipD) {
+  function buildStick(cue) {
+    const vis = cueVisualStyle(cue);
     disposeGroup(stick);
-    stickTipD = tipD;
-    const rt = tipD / 2;
-    const part = (y0, y1, r0, r1, color, rough = 0.5) => {
+    stickStyleKey = vis.key;
+    const rt = vis.tipDiameterMm / 2;
+    const s = vis.profileScale;
+    const ferrEnd = vis.tipLenMm + vis.ferruleLenMm;
+    const rNeck = rt + 0.3;
+    const rJoint = 10.4 * s;
+    const rCollar = 11.0 * s;
+    const rFore = 12.2 * s;
+    const rWrapEnd = 13.6 * s;
+    const rCap = 14.8 * s;
+    const rButtEnd = 15.2 * s;
+    const part = (y0, y1, r0, r1, color, rough = 0.5, metal = 0) => {
       // tip end at y0 (radius r0), butt end at y1 (radius r1); cylinder axis = local Y, tip at the origin
       const g = new THREE.CylinderGeometry(r1, r0, y1 - y0, 20, 1);
-      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, roughness: rough }));
+      const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal }));
       m.position.y = (y0 + y1) / 2;
       m.castShadow = true;
       stick.add(m);
     };
-    part(0, 8, rt, rt, '#2f6fb8', 0.9); // chalked leather tip
-    part(8, 30, rt, rt + 0.3, '#f4f1e6', 0.35); // ferrule
-    part(30, 760, rt + 0.3, 10.3, '#e7c98f', 0.45); // maple shaft
-    part(760, 800, 10.3, 11, '#c9a24a', 0.3); // joint ring
-    part(800, 1010, 11, 13, '#241a14', 0.8); // wrap
-    part(1010, STICK_LEN, 13, 15, '#150e0a', 0.5); // butt
+    part(0, vis.tipLenMm, rt, rt, vis.tipColor3d, vis.tipRough); // tip
+    part(vis.tipLenMm, ferrEnd, rt, rNeck, vis.ferruleColor, 0.32); // ferrule
+    part(ferrEnd, 760, rNeck, rJoint, vis.shaftColor, vis.shaftRough, vis.shaft === 'carbon' ? 0.15 : 0); // shaft
+    part(760, 796, rJoint, rCollar, vis.collarColor, 0.25, 0.65); // joint collar / metallic ring
+    part(796, 980, rCollar, rFore, vis.forearmColor, 0.35); // forearm
+    part(980, 1260, rFore, rWrapEnd, vis.wrapColor, 0.85); // grip / wrap
+    part(1260, STICK_LEN - 26, rWrapEnd, rCap, vis.buttColor, 0.35); // butt sleeve
+    part(STICK_LEN - 26, STICK_LEN, rCap, rButtEnd, vis.capColor, 0.3, 0.2); // butt cap
   }
 
   const Y = new THREE.Vector3(0, 1, 0);
@@ -399,8 +494,9 @@ export async function createView3D(host) {
       return;
     }
     lastStick = st;
-    const td = (sc.tipDiameterMm || 12.5) + 0;
-    if (td !== stickTipD) buildStick(td);
+    const cueSpec = st.cue || { tipDiameterMm: sc.tipDiameterMm || 12.5 };
+    const vis = cueVisualStyle(cueSpec);
+    if (vis.key !== stickStyleKey) buildStick(cueSpec);
     let pull = pullMm(st.power);
     if (stroke) {
       const t = (now - stroke.t0) / stroke.dur;
@@ -496,7 +592,10 @@ export async function createView3D(host) {
     if (info) {
       const hasGhost = !!info.ghost;
       const blocked = info.blockedCue !== null;
-      if (o.aim) solid(info.cue, along(info.cue, info.aimDir, info.aimLen), 3, blocked ? [1, 0.32, 0.32] : [1, 1, 1]);
+      if (o.aim) {
+        if (sc.simpleAim) dashed(info.cue, along(info.cue, info.aimDir, info.aimLen), 2.2, [1, 1, 1], 14, 14);
+        else solid(info.cue, along(info.cue, info.aimDir, info.aimLen), 3, blocked ? [1, 0.32, 0.32] : [1, 1, 1]);
+      }
       if (o.actual && info.actualDir && Math.abs(info.squirtDeg) > 0.005) {
         const e = along(info.cue, info.actualDir, info.aimLen);
         dashed(info.cue, e, 3, SLIDE_RGB, 18, 10);
@@ -509,7 +608,7 @@ export async function createView3D(host) {
         aidGroup.add(gm);
         flatRing(aidGroup, info.ghost.x, info.ghost.y, R - 1.5, R + 0.5, '#ffffff', 0.9);
       }
-      if (o.pocket && info.manual && hasGhost) solid(info.obj, along(info.obj, info.objDir, 500), 3, [1, 0.835, 0.29]);
+      if (o.pocket && info.manual && hasGhost) solid(info.obj, along(info.obj, info.objDir, sc.objLineLen || 500), 3, [1, 0.835, 0.29]);
       else if (o.pocket && !info.manual && info.pocketAim) solid(info.obj, info.pocketAim, 3, info.blockedObj !== null ? [1, 0.32, 0.32] : [1, 0.835, 0.29]);
       if (o.tangent && hasGhost) dashed(info.ghost, along(info.ghost, info.stunDir, 420), 2.6, hexRgb01('#4fc3f7'), 14, 9);
       if (o.roll && hasGhost) dashed(info.ghost, along(info.ghost, info.rollDir, 380), 2.6, hexRgb01('#ce93d8'), 6, 9);
@@ -520,8 +619,8 @@ export async function createView3D(host) {
       }
       if (info.pocketIdx !== null && info.pocketIdx !== undefined && (o.pocket || sc.showPocketRing) && curGeo) {
         const pk = curGeo.POCKETS[info.pocketIdx];
-        const rr = (pk.type === 'corner' ? 0.44 * mouths.corner : 0.34 * mouths.side) + 10;
-        flatRing(aidGroup, pk.x - pk.axis.x * 18, pk.y - pk.axis.y * 18, rr - 2.5, rr, '#ffd54a', sc.pocketExplicit ? 1 : 0.6, 1.4);
+        const rr = pk.dropR + 8;
+        flatRing(aidGroup, pk.cx, pk.cy, rr - 2.5, rr, '#ffd54a', sc.pocketExplicit ? 1 : 0.6, 1.4);
       }
     }
     if (sc.targetId && sc.showTarget) {
@@ -638,10 +737,12 @@ export async function createView3D(host) {
     // situational director (Tự động)
     let blend = 0;
     let moving = false;
+    let dirActive = false;
     if (camMode === 'auto') {
       const r = director.update({ shooting, scratch: !!sc.scratch, userInput: snapRequested }, now);
       blend = r.blend;
       moving = r.moving;
+      dirActive = r.state !== 'eye' && r.state !== 'top';
     } else {
       director.reset();
     }
@@ -662,14 +763,15 @@ export async function createView3D(host) {
         eye.position.z + (top.position.z - eye.position.z) * blend,
       );
       camera.quaternion.slerpQuaternions(qEye, qTop, blend);
-      camera.fov = fovEye;
     } else {
       camera.position.set(eye.position.x, eye.position.y, eye.position.z);
       camera.quaternion.copy(qEye);
-      camera.fov = fovEye;
     }
-    camera.updateProjectionMatrix();
-    animatingNow = !!trans || moving || strokeActive || (shooting && camMode === 'follow');
+    if (Math.abs(camera.fov - fovEye) > 1e-4) {
+      camera.fov = fovEye;
+      camera.updateProjectionMatrix();
+    }
+    animatingNow = !!trans || moving || dirActive || strokeActive || (shooting && camMode === 'follow');
   }
 
   /* ---------------------------------------------------------------- sizing / quality */

@@ -585,5 +585,5 @@ export function createKeyboard({ api, stage, canvas, onLayout = () => {} }) {
     { passive: false },
   );
 
-  return { refresh, stopAll, showBadge };
+  return { refresh, stopAll, showBadge, isHelpOpen: helpOpen };
 }

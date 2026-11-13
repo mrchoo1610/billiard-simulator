@@ -455,12 +455,20 @@ function firstCushion(setup) {
   const a70 = attempt(70);
   add('D6', 'Lỗ giữa khó hơn khi góc lớn', 'góc 30° vào; góc 70° bị từ chối', `30°: ${a30 ? 'vào' : 'không'}; 70°: ${a70 ? 'vào' : 'không'} (bắn thẳng vào tâm lỗ)`, a30 && !a70 ? OK : FAIL);
 }
+{
+  const t = rad(55);
+  const sideSim = newSim([createBall(0, GEO.W / 2 + 300 * Math.sin(t) + 25, 300 * Math.cos(t))]);
+  sideSim.strike({ aimDir: { x: -Math.sin(t), y: -Math.cos(t) }, power: 0.45, tip: { x: 0, y: 0 }, elevationDeg: 0 });
+  sideSim.run(8);
+  const jaws = sideSim.events.cushionHits.filter((c) => c.wall === 'jaw').length;
+  add('D7', 'Lắc miệng lỗ (pocket jaw rattle)', 'đánh lệch vào má lỗ bị nảy qua lại ≥ 2 lần và bật ra', `số lần đập má lỗ=${jaws}; vào lỗ=${sideSim.balls[0].potted ? 'có' : 'không'}`, !sideSim.balls[0].potted && jaws >= 2 ? OK : FAIL);
+}
 
 /* ------------------------------------------------------------------ E. outside the model */
 add('E1', 'Bi nhảy (jump shot), massé mạnh', 'ngoài phạm vi', 'không đo', NA, 'Xung theo phương đứng bị bàn hấp thụ; nâng cơ chỉ cho swerve nhẹ (≤30°)');
 add('E2', 'Bi bẩn / phấn trên bi (kick/skid)', 'ngoài phạm vi', 'không đo', NA, 'Ma sát đồng nhất, không có độ bẩn');
 add('E3', 'Mặt bàn nghiêng, vải mòn theo hướng', 'ngoài phạm vi', 'không đo', NA, 'Mặt bàn phẳng, ma sát đẳng hướng');
-add('E4', 'Bi lắc trong miệng lỗ (rattle)', 'ngoài phạm vi', 'không đo', NA, 'Lỗ không có má cong; chỉ có điểm chắn ở đầu mút băng');
+// E4 (bi lắc trong miệng lỗ) đã được hỗ trợ từ mô hình má lỗ vát và hố rơi.
 // E5 (ma sát bi–bi phụ thuộc tốc độ) đã được hỗ trợ từ Giai đoạn 4: không còn thuộc mục E.
 
 /* ------------------------------------------------------------------ report */

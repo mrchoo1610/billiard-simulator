@@ -124,7 +124,7 @@ export function createInput({ canvas, renderer, getBalls, getTable, getCuePos, c
         }
       }
     }
-    if (drag.moved && drag.ball && canDrag()) {
+    if (drag.moved && drag.ball && canDrag(drag.ball)) {
       const w = renderer.screenToWorld(s);
       const target = { x: w.x + drag.offset.x, y: w.y + drag.offset.y };
       if (placeBall(drag.ball, target, getBalls(), getTable())) onMove(drag.ball);
@@ -148,7 +148,7 @@ export function createInput({ canvas, renderer, getBalls, getTable, getCuePos, c
         const i = hitPocket(d.world);
         if (i >= 0) onTapPocket(i);
       }
-    } else if (d.ball && canDrag()) {
+    } else if (d.ball && canDrag(d.ball)) {
       onDragEnd(d.ball);
     }
   }
@@ -168,6 +168,7 @@ export function createSpinPad(canvas, onChange) {
   let lastTap = 0;
   let size = 120;
   let miscueLimit = 0.55; // tip radius (fraction of R) beyond which the cue miscues
+  let locked = false;
   const MAXR = 0.85; // fraction of the pad radius used by tip = 1
 
   function resize() {
@@ -243,7 +244,7 @@ export function createSpinPad(canvas, onChange) {
   }
 
   canvas.addEventListener('pointerdown', (e) => {
-    if (active !== null) return;
+    if (locked || active !== null) return;
     active = e.pointerId;
     try {
       canvas.setPointerCapture(e.pointerId);
@@ -261,7 +262,7 @@ export function createSpinPad(canvas, onChange) {
     e.preventDefault();
   });
   canvas.addEventListener('pointermove', (e) => {
-    if (e.pointerId !== active) return;
+    if (locked || e.pointerId !== active) return;
     set(fromEvent(e));
   });
   const end = (e) => {
@@ -275,13 +276,21 @@ export function createSpinPad(canvas, onChange) {
   };
   canvas.addEventListener('pointerup', end);
   canvas.addEventListener('pointercancel', end);
-  canvas.addEventListener('dblclick', () => set({ x: 0, y: 0 }));
+  canvas.addEventListener('dblclick', () => {
+    if (!locked) set({ x: 0, y: 0 });
+  });
 
   resize();
   function setMiscueLimit(m) {
     miscueLimit = m;
     draw();
   }
+  function setLocked(on) {
+    locked = !!on;
+    if (locked) active = null;
+    canvas.classList.toggle('locked', locked);
+    canvas.setAttribute('aria-disabled', String(locked));
+  }
 
-  return { set, get: () => ({ ...tip }), draw, resize, setMiscueLimit };
+  return { set, get: () => ({ ...tip }), draw, resize, setMiscueLimit, setLocked };
 }

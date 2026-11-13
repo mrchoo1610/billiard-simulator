@@ -6,6 +6,7 @@
   "description": "Bida 9 bi - Tap luyen (no dependencies, no build step)",
   "scripts": {
     "test": "node --test \"tests/core/*.test.mjs\"",
+    "test:cases": "node tests/case/test-suite.mjs",
     "audit": "node scripts/physics-audit.mjs"
   }
 }

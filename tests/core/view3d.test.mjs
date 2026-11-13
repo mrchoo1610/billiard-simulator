@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   toThree, fromThree, physQuatToThree, rotateVec, cameraPose, fovForAspect, topDownPose, createCameraDirector,
-  cuePose, pullMm, strokePull, cushionFrames, railHoleOutline, dashSegments, pathSegments, naturalRollIndex,
+  cuePose, pullMm, strokePull, cushionFrames, railHoleOutline, clothCutoutOutline, tableOpeningOutline, clothBedOutline, dashSegments, pathSegments, naturalRollIndex,
   ribbonQuads, ballTexturePixels, uvOfBodyPoint, discLocal, NUMBER_DISCS, clampCamDist, clampCamHeight,
   lerpAngle, easeInOut, nextCameraMode, parseHex, RAIL_WIDTH_3D,
 } from '../../src/ui/view3d-math.js';
-import { integrateQuat, quatIdentity } from '../../src/core/physics.js';
-import { buildTable, R } from '../../src/core/table.js';
+import { createDropAnim, stepDropAnim, dropVisual, DROP_DURATION } from '../../src/ui/drop-anim.js';
+import { integrateQuat, quatIdentity, simulate, createBall } from '../../src/core/physics.js';
+import { buildTable, railStripBevel, R } from '../../src/core/table.js';
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} !~ ${b}`);
 const dims = { W: 2540, H: 1270 };
@@ -279,4 +280,83 @@ test('small math helpers', () => {
   near(lerpAngle(3, -3, 0.5), 3 + (2 * Math.PI - 6) / 2 , 1e-9);
   near(easeInOut(0.5), 0.5); near(easeInOut(0), 0); near(easeInOut(1), 1);
   assert.deepEqual(parseHex('#0b6e4f'), [11, 110, 79]);
+});
+
+test('cloth cutout outline = playing rectangle minus pocket circles', () => {
+  const geo = buildTable({ size: '9ft', cornerMouth: 127, sideMouth: 140, pocketCaptureScale: 0.85 });
+  const circles = geo.POCKETS.map((pk) => {
+    const out = pk.type === 'corner' ? 20 : 16;
+    return { cx: pk.x - pk.axis.x * out, cy: pk.y - pk.axis.y * out, r: pk.type === 'corner' ? 0.44 * 127 : 0.34 * 140 };
+  });
+  const pts = clothCutoutOutline({ W: geo.W, H: geo.H, circles });
+  assert.ok(pts.length > 500);
+  let area = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i];
+    const b = pts[(i + 1) % pts.length];
+    area += a.x * b.y - b.x * a.y;
+    assert.ok(a.x >= -1e-3 && a.x <= geo.W + 1e-3 && a.y >= -1e-3 && a.y <= geo.H + 1e-3, 'stays inside playing rectangle');
+    for (const c of circles) assert.ok(Math.hypot(a.x - c.cx, a.y - c.cy) >= c.r - 1e-3, 'stays outside pocket circles');
+    assert.ok(Math.hypot(b.x - a.x, b.y - a.y) < 12, 'no jumps');
+  }
+  assert.ok(Math.abs(area) / 2 < geo.W * geo.H, 'smaller than full rectangle');
+});
+
+test('pocket drop animation: Sim records drop info, ball falls downward and fades out inside pocket cup', () => {
+  const res = simulate([createBall(0, 300, 300)], { aimDir: { x: -1, y: -1 }, power: 0.4, tip: { x: 0, y: 0 } }, { recordPaths: false });
+  assert.equal(res.events.drops.length, 1);
+  const d0 = res.events.drops[0];
+  assert.equal(d0.id, 0);
+  assert.ok(d0.pr > 30);
+  const anim = createDropAnim(d0);
+  let alive = true;
+  let maxZ = 0;
+  for (let i = 0; i < 60 && alive; i++) {
+    alive = stepDropAnim(anim, 1 / 60);
+    maxZ = Math.max(maxZ, anim.z);
+    assert.ok(Math.hypot(anim.x - anim.px, anim.y - anim.py) <= anim.pr, 'stays inside pocket well');
+  }
+  assert.equal(alive, false, 'finishes within 1 s');
+  assert.ok(anim.t >= DROP_DURATION);
+  assert.ok(maxZ > 40, `ball dropped visibly (${maxZ} mm)`);
+  assert.equal(dropVisual(anim).fade, 0);
+});
+
+test('pocket mouth geometry: beveled cushion strips, cloth throat bed and rail opening outline', () => {
+  const geo = buildTable({ size: '9ft', cornerMouth: 127, sideMouth: 140, pocketCaptureScale: 0.85 });
+  // beveled cushion ends flare away from pocket openings (back shorter than nose)
+  for (const s of geo.RAIL_SEGMENTS) {
+    const bev = railStripBevel(s, geo.JAWS, 36);
+    assert.ok(bev.slopeStart < 0 && bev.slopeEnd > 0, 'cushion bevels inward on both pocket ends');
+    near(Math.hypot(bev.pts[1].x - bev.pts[0].x, bev.pts[1].y - bev.pts[0].y), bev.len);
+  }
+  // cushionFrames oriented bevels keep exact back corners even when segment ends swap for right-handedness
+  const frames = cushionFrames(geo.RAIL_SEGMENTS);
+  geo.RAIL_SEGMENTS.forEach((s, idx) => {
+    const f = frames[idx];
+    const fSeg = { a: f.origin, b: { x: f.origin.x + f.e3.x * f.len, y: f.origin.y + f.e3.z * f.len }, n: s.n };
+    const fBev = railStripBevel(fSeg, geo.JAWS, 36);
+    const orig = railStripBevel(s, geo.JAWS, 36);
+    assert.ok(fBev.slopeStart < 0 && fBev.slopeEnd > 0, `frame-oriented bevel flares inward on seg ${idx}`);
+    const back0 = { x: f.origin.x + 36 * f.n3.x + 36 * fBev.slopeStart * f.e3.x, y: f.origin.y + 36 * f.n3.z + 36 * fBev.slopeStart * f.e3.z };
+    const back1 = { x: fSeg.b.x + 36 * f.n3.x + 36 * fBev.slopeEnd * f.e3.x, y: fSeg.b.y + 36 * f.n3.z + 36 * fBev.slopeEnd * f.e3.z };
+    const set = [orig.pts[2], orig.pts[3]];
+    assert.ok(set.some((p) => Math.hypot(p.x - back0.x, p.y - back0.y) < 1e-6));
+    assert.ok(set.some((p) => Math.hypot(p.x - back1.x, p.y - back1.y) < 1e-6));
+  });
+  const clothPts = clothBedOutline({ W: geo.W, H: geo.H, pockets: geo.POCKETS, step: 3 });
+  assert.ok(clothPts.length > 100);
+  for (const p of clothPts) {
+    for (const pk of geo.POCKETS) {
+      assert.ok(Math.hypot(p.x - pk.cx, p.y - pk.cy) >= pk.dropR - 1e-3, 'cloth stays outside drop wells');
+    }
+  }
+  const openPts = tableOpeningOutline({ W: geo.W, H: geo.H, inset: 36, pockets: geo.POCKETS, step: 3 });
+  assert.ok(openPts.length > 100);
+  for (const p of openPts) {
+    assert.ok(Math.abs(p.x) <= geo.W + RAIL_WIDTH_3D && Math.abs(p.y) <= geo.H + RAIL_WIDTH_3D);
+    for (const pk of geo.POCKETS) {
+      assert.ok(Math.hypot(p.x - pk.cx, p.y - pk.cy) >= pk.dropR - 1e-3, 'rail frame stays outside drop wells');
+    }
+  }
 });

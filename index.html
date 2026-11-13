@@ -10,13 +10,18 @@
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="assets/style.css">
 </head>
-<body data-mode="free">
+<body data-app="practice" data-mode="free">
   <header class="top">
     <h1>Bida 9 bi</h1>
     <button type="button" id="equipChip" class="equip-chip" aria-haspopup="dialog" aria-controls="sheet" title="Chọn bàn và gậy">
       <span id="equipChipText">Bàn · Gậy</span>
     </button>
-    <nav class="tabs" id="tabs" aria-label="Chế độ">
+    <nav class="main-modes" id="mainModes" aria-label="Phân khu chơi">
+      <button type="button" data-app="bot">Bắn với Bot</button>
+      <button type="button" data-app="bvb">Đấu 2 Bot</button>
+      <button type="button" data-app="practice" class="active">Luyện tập</button>
+    </nav>
+    <nav class="tabs" id="tabs" aria-label="Chế độ luyện tập">
       <button type="button" data-mode="free" class="active">Tự do</button>
       <button type="button" data-mode="thickness">Đoán độ dày</button>
       <button type="button" data-mode="position">Điều bi cái</button>
@@ -30,10 +35,11 @@
       <canvas id="table3d" aria-label="Bàn bida 3D – góc nhìn mắt cơ thủ" hidden></canvas>
       <canvas id="minimap" class="minimap" title="Chạm để về góc nhìn 2D" aria-label="Bản đồ bàn – chạm để về 2D" hidden></canvas>
       <div class="view-ctl">
-        <div class="seg-mini" role="group" aria-label="Góc nhìn">
+        <div class="seg-mini" role="group" aria-label="Góc nhìn và âm thanh">
           <span class="seg-label">Góc nhìn</span>
           <button type="button" data-view="2d" aria-pressed="true" title="Góc nhìn 2D (phím V)">2D</button>
           <button type="button" data-view="3d" aria-pressed="false" title="Góc nhìn 3D Mắt cơ thủ (phím V)">3D</button>
+          <button type="button" id="btnSound" class="sound-btn" aria-pressed="true" title="Bật/tắt âm thanh (phím M)" aria-label="Âm thanh">🔊</button>
         </div>
         <div class="v3-opts" id="v3opts" hidden>
           <div class="seg-mini" role="group" aria-label="Camera">
@@ -49,11 +55,53 @@
           </div>
         </div>
       </div>
+      <div id="pottedTray" class="potted-tray" aria-live="polite" aria-label="Bi đã rơi vào lỗ" hidden></div>
       <div class="v3-load" id="v3load" role="status" hidden>Đang tải 3D…</div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
     </section>
 
     <section class="side">
+      <!-- Chế độ Bắn với Bot / Đấu 2 Bot -->
+      <div class="drill only-bot" id="botHud">
+        <div class="bot-head">
+          <div class="bot-score">
+            <span class="bot-side"><small id="botName1" class="bot-player-name" title="Chạm để đổi tên">Bạn</small><strong id="botScorePlayer">0</strong></span>
+            <span class="bot-vs">VS</span>
+            <span class="bot-side"><small id="botName2" class="bot-player-name" title="Chạm để đổi tên">Bot</small><strong id="botScoreBot">0</strong></span>
+          </div>
+          <div class="bot-meta">
+            <span class="pill" id="botTurnPill">Lượt bạn</span>
+            <span class="pill pill-target" id="botTargetPill">Bi #1</span>
+            <span class="bot-more-cue" title="Rê chuột vào để đổi độ khó / Ván mới" aria-hidden="true">⚙</span>
+          </div>
+        </div>
+        <p class="drill-prompt" id="botStatusText">Đặt bi cái sau vạch đầu bàn và phá bi.</p>
+        <div class="bot-bvb-controls" id="bvbControls" hidden>
+          <button type="button" id="btnBvbPause" class="btn small" title="Tạm dừng hoặc tiếp tục trận đấu">⏸ Tạm dừng</button>
+          <button type="button" id="btnBvbSpeed" class="btn small" title="Đổi tốc độ suy nghĩ">⚡ 1x</button>
+          <button type="button" id="btnBvbRename" class="btn small" title="Đặt lại tên 2 Bot">✏️ Đổi tên</button>
+        </div>
+        <div class="bot-controls">
+          <label class="bot-diff-wrap">
+            <span>Luật</span>
+            <select id="botGame" aria-label="Thể thức đấu Bot">
+              <option value="9ball" selected>9 Bi</option>
+              <option value="8ball">8 Bi</option>
+            </select>
+          </label>
+          <label class="bot-diff-wrap" id="botDiffWrap">
+            <span>Độ khó</span>
+            <select id="botDiff" aria-label="Độ khó Bot">
+              <option value="easy">Dễ</option>
+              <option value="medium" selected>Trung bình</option>
+              <option value="hard">Khó</option>
+              <option value="pro">Cao thủ</option>
+            </select>
+          </label>
+          <button type="button" id="btnNewMatch" class="btn primary small">Ván mới</button>
+        </div>
+      </div>
+
       <!-- Chế độ Đoán độ dày -->
       <div class="drill only-thick" id="drillThick">
         <div class="drill-title">Bi mục tiêu đi vào lỗ đã chọn. Bạn ngắm <b>độ dày</b> nào?</div>
@@ -90,14 +138,14 @@
       <div class="quickbar hide-thick">
         <label class="power" for="power">
           <span>Lực</span>
-          <input type="range" id="power" min="0" max="100" step="1" value="50">
-          <output id="powerVal">50%</output>
+          <input type="range" id="power" min="0" max="100" step="1" value="30">
+          <output id="powerVal">30%</output>
         </label>
         <button type="button" id="btnShoot" class="btn primary">Đánh</button>
       </div>
 
       <div class="aimbar hide-thick" id="aimbar" role="group" aria-label="Chỉnh hướng ngắm">
-        <button type="button" id="btnAimMode" class="btn aim-mode hide-squirt" aria-pressed="false" title="Chuyển kiểu ngắm">Ngắm: Tự động</button>
+        <button type="button" id="btnAimMode" class="btn aim-mode hide-squirt hide-bot" aria-pressed="false" title="Chuyển kiểu ngắm">Ngắm: Tự động</button>
         <button type="button" class="btn nudge" data-nudge="-1" aria-label="Xoay trái 1 độ">◀◀</button>
         <button type="button" class="btn nudge" data-nudge="-0.1" aria-label="Xoay trái 0,1 độ">◀</button>
         <output id="aimAngleVal" class="aim-angle" aria-live="off">0,0°</output>
@@ -110,7 +158,7 @@
       </button>
 
       <div class="panel" id="panel">
-        <section class="card">
+        <section class="card hide-bot">
           <h2>Thông tin cú đánh</h2>
           <dl class="info">
             <dt>Góc cắt</dt><dd id="infoCut">–</dd>
@@ -128,14 +176,14 @@
         </section>
 
         <section class="card hide-thick">
-          <h2>Điều khiển</h2>
+          <h2>Điểm chạm &amp; Điều khiển</h2>
           <div class="controls">
             <div class="spin-wrap">
               <canvas id="spin" class="spin" aria-label="Điểm chạm trên bi cái"></canvas>
               <div class="spin-label" id="spinLabel">Giữa (bi dừng)</div>
               <div class="hint">Chạm đúp để về giữa</div>
             </div>
-            <div class="sliders">
+            <div class="sliders hide-bot">
               <label class="aim" for="aimOffset">
                 <span>Lệch ngắm</span>
                 <input type="range" id="aimOffset" min="-5" max="5" step="0.1" value="0">
@@ -151,7 +199,7 @@
                 <span>Tự bù effet</span>
               </label>
               <div class="btn-grid">
-                <button type="button" id="btnReset" class="btn">Đặt lại</button>
+                <button type="button" id="btnReset" class="btn hide-bot">Đặt lại</button>
                 <button type="button" id="btnRandom" class="btn only-free-inline">Ngẫu nhiên</button>
                 <button type="button" id="btnRack" class="btn only-free-inline">Xếp 9 bi</button>
                 <button type="button" id="btnShare" class="btn only-free-inline">Chia sẻ</button>
@@ -160,7 +208,7 @@
           </div>
         </section>
 
-        <section class="card hide-thick">
+        <section class="card hide-thick hide-bot">
           <h2>Hiển thị</h2>
           <div class="toggles">
             <label><input type="checkbox" data-ov="aim" checked> Đường ngắm</label>
@@ -198,6 +246,109 @@
     </div>
   </div>
 
-  <script type="module" src="src/app.js"></script>
+  <!-- Màn hình chọn chế độ khi vào game -->
+  <div id="lobby" class="lobby" hidden>
+    <div class="lobby-backdrop"></div>
+    <div class="lobby-dialog" role="dialog" aria-modal="true" aria-labelledby="lobbyTitle">
+      <div class="lobby-header">
+        <span class="lobby-kicker">Bida 9 Bi · Mô phỏng vật lý thực</span>
+        <h2 id="lobbyTitle">Chọn chế độ chơi</h2>
+        <p>Đấu 9 bi đối kháng với Bot AI hoặc vào phòng luyện tập tự do &amp; kỹ năng.</p>
+      </div>
+      <div class="lobby-cards">
+        <article class="lobby-card lobby-card-bot">
+          <div class="lobby-icon" aria-hidden="true">🤖</div>
+          <h3>Bắn với Bot</h3>
+          <p>Đấu 9 bi hoặc 8 bi đối kháng thực thụ: tia bi ảo &amp; trình độ Bot tăng dần theo cấp.</p>
+          <div class="lobby-game" id="lobbyGame" role="group" aria-label="Chọn thể thức đấu Bot">
+            <button type="button" data-game="9ball" class="active">9 Bi</button>
+            <button type="button" data-game="8ball">8 Bi (8 Ball)</button>
+          </div>
+          <div class="lobby-diff" id="lobbyDiff" role="group" aria-label="Chọn độ khó Bot">
+            <button type="button" data-diff="easy">Dễ</button>
+            <button type="button" data-diff="medium" class="active">Trung bình</button>
+            <button type="button" data-diff="hard">Khó</button>
+            <button type="button" data-diff="pro">Cao thủ</button>
+          </div>
+          <p class="lobby-diff-desc" id="lobbyDiffDesc">Bi ma + tia bi ngắn · Bot bù squirt &amp; né lỗi</p>
+          <button type="button" id="btnStartBot" class="btn primary lobby-cta">Vào trận với Bot</button>
+        </article>
+
+        <article class="lobby-card lobby-card-bvb">
+          <div class="lobby-icon" aria-hidden="true">🤖⚔️🤖</div>
+          <h3>Đấu 2 Bot</h3>
+          <p>Hai Bot AI so tài tự động. Tùy chỉnh tên và độ khó cho từng Bot.</p>
+          <div class="bvb-setup">
+            <div class="bvb-input-group">
+              <label for="bvbName1">Bot 1</label>
+              <div class="bvb-input-row">
+                <input type="text" id="bvbName1" value="Alpha" maxlength="15" placeholder="Tên Bot 1">
+                <select id="bvbDiff1" aria-label="Độ khó Bot 1">
+                  <option value="easy">Dễ</option>
+                  <option value="medium">TB</option>
+                  <option value="hard" selected>Khó</option>
+                  <option value="pro">Pro</option>
+                </select>
+              </div>
+            </div>
+            <div class="bvb-input-group">
+              <label for="bvbName2">Bot 2</label>
+              <div class="bvb-input-row">
+                <input type="text" id="bvbName2" value="Beta" maxlength="15" placeholder="Tên Bot 2">
+                <select id="bvbDiff2" aria-label="Độ khó Bot 2">
+                  <option value="easy">Dễ</option>
+                  <option value="medium">TB</option>
+                  <option value="hard">Khó</option>
+                  <option value="pro" selected>Pro</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="lobby-game" id="lobbyBvbGame" role="group" aria-label="Chọn thể thức đấu 2 Bot">
+            <button type="button" data-game="9ball" class="active">9 Bi</button>
+            <button type="button" data-game="8ball">8 Bi</button>
+          </div>
+          <button type="button" id="btnStartBvb" class="btn primary lobby-cta">Bắt đầu Đấu 2 Bot</button>
+        </article>
+
+        <article class="lobby-card lobby-card-practice">
+          <div class="lobby-icon" aria-hidden="true">🎯</div>
+          <h3>Luyện tập</h3>
+          <p>Đặt bi tự do, xem đường đi dự đoán, luyện đoán độ dày, điều bi cái &amp; bù squirt.</p>
+          <ul class="lobby-tags">
+            <li>Tự do</li>
+            <li>Đoán độ dày</li>
+            <li>Điều bi cái</li>
+            <li>Bù squirt</li>
+          </ul>
+          <button type="button" id="btnStartPractice" class="btn lobby-cta">Mở phòng luyện tập</button>
+        </article>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal đổi tên 2 Bot -->
+  <div id="renameModal" class="rename-modal" hidden>
+    <div class="rename-backdrop"></div>
+    <div class="rename-dialog" role="dialog" aria-modal="true" aria-labelledby="renameTitle">
+      <h3 id="renameTitle">Đổi tên 2 Bot</h3>
+      <div class="rename-body">
+        <label>
+          <span>Tên Bot 1:</span>
+          <input type="text" id="renameInput1" maxlength="15" placeholder="Bot 1">
+        </label>
+        <label>
+          <span>Tên Bot 2:</span>
+          <input type="text" id="renameInput2" maxlength="15" placeholder="Bot 2">
+        </label>
+      </div>
+      <div class="rename-actions">
+        <button type="button" id="btnSaveRename" class="btn primary">Lưu tên</button>
+        <button type="button" id="btnCancelRename" class="btn">Hủy</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="src/app.js?v=27"></script>
 </body>
 </html>

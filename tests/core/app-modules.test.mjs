@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { R, buildTable } from '../../src/core/table.js';
 import { computeShot } from '../../src/core/geometry.js';
 import { encodeState, decodeState } from '../../src/features/share.js';
-import { createBall } from '../../src/core/physics.js';
-import { tablePreset, cuePreset } from '../../src/core/equipment.js';
+import { createBall, simulate } from '../../src/core/physics.js';
+import { tablePreset, cuePreset, CUE_PRESETS, physicsEquipmentKey, cueVisualStyle } from '../../src/core/equipment.js';
+import { createSoundEngine } from '../../src/ui/sound.js';
 import * as drills from '../../src/features/drills.js';
 
 const POCKETS = buildTable(tablePreset('club-9ft')).POCKETS;
@@ -94,4 +95,51 @@ test('share: manual aim angle a= (1 decimal) round trips', () => {
   assert.equal(decodeState('#c=1,1;a=x').aimDeg, null);
   assert.equal(decodeState('#c=1,1').aimDeg, null);
   assert.equal(encodeState({ balls, targetId: 1, pocket: null }), 'c=1270,635;1=1905,635;t=1');
+});
+
+test('equipment: physicsEquipmentKey ignores metadata and reacts to physics changes', () => {
+  const table = tablePreset('club-9ft');
+  const cue = cuePreset('user-cue');
+  const baseKey = physicsEquipmentKey({ table, cue });
+  const renamedCue = { ...cue, name: 'Custom Name', note: 'edited', tipHardness: 'hard', shaft: 'carbon' };
+  assert.equal(physicsEquipmentKey({ table, cue: renamedCue }), baseKey);
+  assert.notEqual(physicsEquipmentKey({ table, cue: { ...cue, squirtDegPerFullSide: cue.squirtDegPerFullSide + 0.1 } }), baseKey);
+  assert.notEqual(physicsEquipmentKey({ table: { ...table, size: '7ft' }, cue }), baseKey);
+});
+
+test('sound engine is safe headless and physics events expose collision impact speed', () => {
+  const states = [];
+  const snd = createSoundEngine({ initialEnabled: true, onChange: (v) => states.push(v) });
+  assert.equal(snd.isEnabled(), true);
+  assert.equal(snd.toggle(), false);
+  assert.deepEqual(states, [false]);
+  snd.cueHit(0.7, false);
+  snd.ballHit(1500);
+  snd.cushionHit(900, false);
+  snd.pocketDrop(600);
+
+  const res = simulate(
+    [createBall(0, 600, 635), createBall(1, 1000, 635)],
+    { aimDir: { x: 1, y: 0 }, power: 0.6, tip: { x: 0, y: 0 } },
+    { recordPaths: false },
+  );
+  assert.ok(res.events.contacts.length >= 1 && res.events.contacts[0].speed > 1000);
+  assert.ok(res.events.cushionHits.length >= 1 && res.events.cushionHits[0].speed > 100);
+});
+
+test('cueVisualStyle gives distinct visual profiles for all cue presets and shaft/tip edits', () => {
+  const keys = new Set(CUE_PRESETS.map((c) => cueVisualStyle(c).key));
+  assert.equal(keys.size, CUE_PRESETS.length);
+
+  const carbon = cueVisualStyle(cuePreset('carbon'));
+  const brk = cueVisualStyle(cuePreset('break'));
+  const std = cueVisualStyle(cuePreset('standard'));
+  assert.notEqual(carbon.shaftColor, std.shaftColor);
+  assert.ok(brk.profileScale > std.profileScale);
+  assert.ok(carbon.ferruleLenMm < std.ferruleLenMm);
+  assert.notEqual(brk.tipColor3d, std.tipColor3d);
+
+  const customCarbon = cueVisualStyle({ ...cuePreset('user-cue'), shaft: 'carbon', tipHardness: 'phenolic' });
+  assert.equal(customCarbon.shaftColor, carbon.shaftColor);
+  assert.equal(customCarbon.tipColor3d, brk.tipColor3d);
 });

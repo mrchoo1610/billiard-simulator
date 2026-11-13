@@ -27,7 +27,7 @@ export const CUE_ID = 0;
 export const MISCUE_SPEED_FACTOR = 0.3;
 export const MISCUE_MAX_DEG = 3;
 export const DEFAULT_ELEVATION_DEG = 5; // UI / drill default; the engine itself defaults to a level cue (0) when a shot omits it
-export const MAX_ELEVATION_DEG = 30;
+export const MAX_ELEVATION_DEG = 72;
 
 /* ------------------------------------------------------------------ quaternions (pure helpers) */
 
@@ -214,6 +214,7 @@ export class Sim {
     this.muSlide = this.tableProfile.muSlide;
     this.muRoll = this.tableProfile.muRoll;
     this.eCushion = this.tableProfile.cushionRestitution;
+    this.eJaw = Math.max(0.45, this.eCushion * 0.85);
     this.sideKick = this.tableProfile.cushionSpinTransfer;
     const tp = this.tableProfile;
     this.ballFrictionScale = tp.ballFriction ?? 1;
@@ -226,6 +227,7 @@ export class Sim {
       firstContactPos: null, // cue-ball centre at the first contact
       firstContactObjPos: null, // object-ball centre at the first contact
       potted: [],
+      drops: [],
       cushionHits: [],
       contacts: [],
       miscue: false,
@@ -463,6 +465,7 @@ export class Sim {
               b: b.id,
               time: this.time,
               pos: { x: (a.pos.x + b.pos.x) / 2, y: (a.pos.y + b.pos.y) / 2 },
+              speed: vn,
             });
           }
           if (ev.firstContact === null && (a.id === CUE_ID || b.id === CUE_ID)) {
@@ -497,6 +500,20 @@ export class Sim {
   }
 
   _pot(b, pk) {
+    this.events.drops.push({
+      id: b.id,
+      pocketId: pk.id,
+      x: b.pos.x,
+      y: b.pos.y,
+      vx: b.vel.x,
+      vy: b.vel.y,
+      w: { x: b.w.x, y: b.w.y, z: b.w.z },
+      q: { w: b.q.w, x: b.q.x, y: b.q.y, z: b.q.z },
+      px: pk.cx,
+      py: pk.cy,
+      pr: pk.dropR,
+      time: this.time,
+    });
     b.potted = true;
     b.vel.x = b.vel.y = 0;
     b.w.x = b.w.y = b.w.z = 0;
@@ -511,67 +528,62 @@ export class Sim {
     const p = b.pos;
     const v = b.vel;
     const sp = Math.hypot(v.x, v.y);
-    if (sp > 1e-9) {
-      for (const pk of this.geo.POCKETS) {
-        const dx = p.x - pk.x;
-        const dy = p.y - pk.y;
-        if (dx * dx + dy * dy < pk.capture * pk.capture) {
-          const c = (v.x * pk.axis.x + v.y * pk.axis.y) / sp;
-          if (c < -pk.minCos) {
-            this._pot(b, pk);
-            return;
-          }
+    // Drop capture inside the pocket well: core well always drops; outer rim requires moving inward
+    // (glancing or fast rattling balls ride across the slate shelf to the opposite jaw).
+    const speedTighten = 1 - 0.12 * clamp((sp - 1000) / 6000, 0, 1);
+    for (const pk of this.geo.POCKETS) {
+      const dx = p.x - pk.cx;
+      const dy = p.y - pk.cy;
+      const d2 = dx * dx + dy * dy;
+      const cap = pk.capture * speedTighten;
+      if (d2 >= cap * cap) continue;
+      const core = pk.capture * 0.72;
+      if (d2 < core * core) {
+        this._pot(b, pk);
+        return;
+      }
+      if (sp > 1e-9) {
+        const d = Math.sqrt(d2);
+        const inward = -(v.x * dx + v.y * dy) / (sp * d);
+        if (inward > 0.25) {
+          this._pot(b, pk);
+          return;
         }
       }
     }
     for (const w of this.geo.WALLS) {
       const d = w.depth(p);
       if (d >= R) continue;
-      const inGap = w.gap(w.along(p));
-      if (d < 0 && inGap) {
-        // crossed the rail line inside a pocket opening
-        let best = this.geo.POCKETS[0];
-        let bd = Infinity;
-        for (const pk of this.geo.POCKETS) {
-          const dd = (p.x - pk.x) ** 2 + (p.y - pk.y) ** 2;
-          if (dd < bd) {
-            bd = dd;
-            best = pk;
-          }
-        }
-        this._pot(b, best);
-        return;
-      }
-      if (inGap) continue;
+      if (w.gap(w.along(p))) continue;
       const vn = v.x * w.n.x + v.y * w.n.y;
       if (vn > 0) this._reflect(b, w, vn);
       else if (d < 0) this._fixDepth(b, w);
     }
-    this._tips(b);
+    this._jaws(b);
   }
 
-  /** Cushion tips (jaw points) act as point obstacles: the ball centre cannot come closer than R. */
-  _tips(b) {
+  /** Angled pocket jaws (including rounded cushion knuckles at their tips) cause off-centre rattle. */
+  _jaws(b) {
     const p = b.pos;
     const v = b.vel;
-    for (const t of this.geo.TIPS) {
-      const dx = p.x - t.x;
-      const dy = p.y - t.y;
+    const r2 = R * R;
+    for (const j of this.geo.JAWS) {
+      const abx = j.b.x - j.a.x;
+      const aby = j.b.y - j.a.y;
+      const t = clamp(((p.x - j.a.x) * abx + (p.y - j.a.y) * aby) / j.len2, 0, 1);
+      const qx = j.a.x + abx * t;
+      const qy = j.a.y + aby * t;
+      const dx = p.x - qx;
+      const dy = p.y - qy;
       const d2 = dx * dx + dy * dy;
-      if (d2 >= R * R) continue;
+      if (d2 >= r2) continue;
       const d = Math.sqrt(d2) || 1e-9;
-      const nx = dx / d;
-      const ny = dy / d;
-      const vn = v.x * nx + v.y * ny;
-      if (vn < 0) {
-        v.x -= (1 + this.eCushion) * vn * nx;
-        v.y -= (1 + this.eCushion) * vn * ny;
-        b.w.z *= SIDE_KEEP;
-        const ch = this.events.cushionHits;
-        if (ch.length < 200) ch.push({ id: b.id, time: this.time, wall: 'tip' });
-      }
-      p.x = t.x + nx * (R + 1e-6);
-      p.y = t.y + ny * (R + 1e-6);
+      const outX = -dx / d;
+      const outY = -dy / d;
+      const vn = v.x * outX + v.y * outY;
+      if (vn > 0) this._bounceNormal(b, outX, outY, vn, this.eJaw, 'jaw', 0.5);
+      p.x = qx - outX * (R + 1e-6);
+      p.y = qy - outY * (R + 1e-6);
     }
   }
 
@@ -583,31 +595,34 @@ export class Sim {
     }
   }
 
-  _reflect(b, w, vn) {
-    const n = w.n;
+  _bounceNormal(b, nx, ny, vn, e, wall, kickCapRatio = 0.6) {
     const v = b.vel;
     const wv = b.w;
-    v.x -= (1 + this.eCushion) * vn * n.x;
-    v.y -= (1 + this.eCushion) * vn * n.y;
+    v.x -= (1 + e) * vn * nx;
+    v.y -= (1 + e) * vn * ny;
     // roll vector (velocity units): normal component reversed and damped
     const sx = -R * wv.y;
     const sy = R * wv.x;
-    const sn = sx * n.x + sy * n.y;
-    const k = 1 - SPIN_NORMAL_KEEP; // sn -> SPIN_NORMAL_KEEP * sn
-    const nsx = sx - k * sn * n.x;
-    const nsy = sy - k * sn * n.y;
+    const sn = sx * nx + sy * ny;
+    const k = 1 - SPIN_NORMAL_KEEP;
+    const nsx = sx - k * sn * nx;
+    const nsy = sy - k * sn * ny;
     wv.y = -nsx / R;
     wv.x = nsy / R;
-    // english kicks the ball along the cushion (capped by the normal speed); side = -R*wz
+    // english kicks the ball along the tangent (capped by the normal speed); side = -R*wz
     let kick = this.sideKick * (-R * wv.z);
-    const cap = 0.6 * vn;
+    const cap = kickCapRatio * vn;
     kick = clamp(kick, -cap, cap);
-    v.x += kick * -n.y;
-    v.y += kick * n.x;
+    v.x += kick * -ny;
+    v.y += kick * nx;
     wv.z *= SIDE_KEEP;
-    this._fixDepth(b, w);
     const ch = this.events.cushionHits;
-    if (ch.length < 200) ch.push({ id: b.id, time: this.time, wall: w.name });
+    if (ch.length < 200) ch.push({ id: b.id, time: this.time, wall, speed: vn });
+  }
+
+  _reflect(b, w, vn) {
+    this._bounceNormal(b, w.n.x, w.n.y, vn, this.eCushion, w.name, 0.6);
+    this._fixDepth(b, w);
   }
 }
 

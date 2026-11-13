@@ -35,6 +35,15 @@ export function solveAim(state, targetId, pocketPoint, shot, table, cue) {
   });
   if (!cueBall || !obj || targetId === 0) return fail('missing');
   const base = computeShot(cueBall.pos, obj.pos, pocketPoint, R);
+  let tx = shot.tip ? shot.tip.x || 0 : 0;
+  let ty = shot.tip ? shot.tip.y || 0 : 0;
+  const tl = Math.hypot(tx, ty);
+  if (tl > 1) {
+    tx /= tl;
+    ty /= tl;
+  }
+  const miscueLimit = cue && Number.isFinite(cue.miscueLimit) ? cue.miscueLimit : 0.55;
+  if (Math.hypot(tx, ty) > miscueLimit + 1e-9) return fail('miscue', base);
   const toPocket = norm(sub(pocketPoint, obj.pos));
   let probes = 0;
 

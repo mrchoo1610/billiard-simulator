@@ -143,3 +143,122 @@ export function firstHit(origin, dir, balls, R, ignoreIds = [0]) {
   const fullness = clamp(1 - Math.sin(rad(cutAngleDeg)), 0, 1);
   return { id: best.id, t: best.t, ghost, objDir, cutAngleDeg, fullness, fullnessLabel: fullnessLabel(fullness) };
 }
+
+const RAIL_NOSE_H = 36;
+const RAIL_TOP_H = 46;
+const RAIL_BEVEL_W = 36;
+export const RAIL_MAX_ELEVATION_DEG = 72;
+
+/**
+ * Cushion / wood-rail top height above the cloth (mm) under world point (x, y).
+ * Returns 0 over the playing bed or outside the outer cabinet rim.
+ */
+export function railSurfaceHeight(x, y, geo) {
+  const W = geo?.W ?? 2540;
+  const H = geo?.H ?? 1270;
+  const rail = geo?.RAIL ?? 110;
+  const ox = x < 0 ? -x : x > W ? x - W : 0;
+  const oy = y < 0 ? -y : y > H ? y - H : 0;
+  const out = Math.max(ox, oy);
+  if (out <= 0.25 || out > rail + 2) return 0;
+  if (out < RAIL_BEVEL_W) return RAIL_NOSE_H + (out / RAIL_BEVEL_W) * (RAIL_TOP_H - RAIL_NOSE_H);
+  return RAIL_TOP_H;
+}
+
+/**
+ * Minimum cue butt elevation (degrees) so the stick clears cushions and wood rails
+ * from impact (pull = 0) through backswing without clipping into the rail.
+ */
+export function minCueElevationDeg(cuePos, aimDir, tip = { x: 0, y: 0 }, geo = {}, opts = {}) {
+  if (!cuePos || !aimDir) return 0;
+  const d = norm(aimDir);
+  if (Math.hypot(d.x, d.y) < 1e-6) return 0;
+  const R_BALL = geo.R ?? 28.575;
+  const right2d = { x: -d.y, y: d.x };
+  let tx = tip?.x || 0;
+  let ty = tip?.y || 0;
+  const tl = Math.hypot(tx, ty);
+  if (tl > 1) {
+    tx /= tl;
+    ty /= tl;
+  }
+  const depth = Math.sqrt(Math.max(0, 1 - tx * tx - ty * ty));
+  const pullBack = opts.pull ?? 200;
+  const pulls = pullBack > 0 ? [0, pullBack] : [0];
+  const minDeg = opts.minDeg ?? 0;
+  const maxDeg = opts.maxDeg ?? RAIL_MAX_ELEVATION_DEG;
+
+  const blockers = [];
+  if (Array.isArray(opts.balls)) {
+    for (const b of opts.balls) {
+      if (!b || b.potted || !b.pos || b.id === 0) continue;
+      const dx = b.pos.x - cuePos.x;
+      const dy = b.pos.y - cuePos.y;
+      if (Math.hypot(dx, dy) < 1e-3) continue;
+      const along = -(dx * d.x + dy * d.y);
+      const lat = Math.abs(dx * right2d.x + dy * right2d.y);
+      if (along >= -2 * R_BALL && along <= pullBack + 1500 && lat <= 2 * R_BALL + 25) {
+        blockers.push({ x: b.pos.x, y: b.pos.y });
+      }
+    }
+  }
+
+  for (let elev = Math.max(0, minDeg); elev <= maxDeg; elev += 0.5) {
+    const e = rad(elev);
+    const ce = Math.cos(e);
+    const se = Math.sin(e);
+    const cx = cuePos.x + R_BALL * (tx * right2d.x + ty * se * d.x - depth * ce * d.x);
+    const cy = cuePos.y + R_BALL * (tx * right2d.y + ty * se * d.y - depth * ce * d.y);
+    const ch = R_BALL * (1 + ty * ce + depth * se);
+    const ux = -d.x * ce;
+    const uy = -d.y * ce;
+
+    let clear = true;
+    for (const pull of pulls) {
+      for (let s = 0; s <= 380; s += 6) {
+        const px = cx + ux * s;
+        const py = cy + uy * s;
+        const rh = railSurfaceHeight(px, py, geo);
+        if (rh <= 0) continue;
+        const ph = ch + s * se;
+        const shaftDist = Math.max(0, s - pull);
+        const rStick = 6.3 + Math.min(8.5, shaftDist * 0.008);
+        const rVert = rStick / Math.max(0.5, ce) + 1.5;
+        if (ph - rVert < rh) {
+          clear = false;
+          break;
+        }
+      }
+      if (!clear) break;
+      if (blockers.length) {
+        const sEnd = pull + 1480;
+        for (const blk of blockers) {
+          const sProj = (blk.x - cx) * ux + (blk.y - cy) * uy + (R_BALL - ch) * se;
+          const sMid = Math.max(pull, Math.min(sEnd, sProj));
+          const sLo = Math.max(pull, sMid - 32);
+          const sHi = Math.min(sEnd, sMid + 32);
+          for (let s = sLo; s <= sHi + 1e-6; s += 4) {
+            const sc = Math.min(s, sHi);
+            const dx = cx + ux * sc - blk.x;
+            const dy = cy + uy * sc - blk.y;
+            const dz = ch + se * sc - R_BALL;
+            const rStick = 6.3 + Math.min(8.7, (sc - pull) * 0.007);
+            const need = R_BALL + rStick + 1.5;
+            if (dx * dx + dy * dy + dz * dz < need * need) {
+              clear = false;
+              break;
+            }
+          }
+          if (!clear) break;
+        }
+      }
+      if (!clear) break;
+    }
+    if (clear) return Math.ceil(elev * 2) / 2;
+  }
+  return maxDeg;
+}
+
+export function effectiveCueElevationDeg(baseDeg, cuePos, aimDir, tip, geo, opts) {
+  return Math.max(baseDeg ?? 0, minCueElevationDeg(cuePos, aimDir, tip, geo, opts));
+}

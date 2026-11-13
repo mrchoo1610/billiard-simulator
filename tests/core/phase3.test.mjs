@@ -96,6 +96,10 @@ test('auto aim: ghost aim misses with english + elevation, solveAim pots the bal
   assert.ok(sol.parts && Number.isFinite(sol.parts.squirt + sol.parts.swerve + sol.parts.throw));
   const bad = solveAim([cue, createBall(1, 700, 100)], 1, pk.aim, { power: 0.25, tip: { x: 0, y: 0 } }, TABLE, STD);
   assert.equal(typeof bad.ok, 'boolean');
+  const miscue = solveAim(balls, 1, pk.aim, { power: 0.3, tip: { x: 0.9, y: 0 }, elevationDeg: 5 }, TABLE, STD);
+  assert.equal(miscue.ok, false);
+  assert.equal(miscue.reason, 'miscue');
+  assert.equal(miscue.probes, 0);
 });
 
 test('quaternion: unit length after 10 s of rolling; number disc advances by distance / R', () => {

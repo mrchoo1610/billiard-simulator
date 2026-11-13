@@ -89,10 +89,10 @@ test('cushion bounces keep balls inside the table', () => {
       sim.step(DT);
       const b = sim.balls[0];
       if (b.potted) break;
-      assert.ok(b.pos.x >= -1 && b.pos.x <= W + 1 && b.pos.y >= -1 && b.pos.y <= H + 1, `outside at ${deg}`);
+      const nearPocket = POCKETS.some((p) => Math.hypot(b.pos.x - p.x, b.pos.y - p.y) < 130);
+      assert.ok(b.pos.x >= -65 && b.pos.x <= W + 65 && b.pos.y >= -65 && b.pos.y <= H + 65, `outside at ${deg}`);
       // unless in a pocket opening, centre stays at least R from rails
       const inside = b.pos.x >= R - 1 && b.pos.x <= W - R + 1 && b.pos.y >= R - 1 && b.pos.y <= H - R + 1;
-      const nearPocket = POCKETS.some((p) => Math.hypot(b.pos.x - p.x, b.pos.y - p.y) < 130);
       assert.ok(inside || nearPocket, `escaped rail at ${deg}: ${b.pos.x},${b.pos.y}`);
     }
   }
@@ -237,6 +237,28 @@ test('corner pocket: diagonal entry drops, rail-hugging entry on a tight table d
   assert.ok(miss.balls[0].pos.x > -5 && miss.balls[0].pos.y > -5, 'ball stays within the table / pocket area');
 });
 
+test('pocket jaws rattle off-centre corner and side shots instead of vanishing', () => {
+  // off-centre corner shot on Pro 9ft hits both jaws and spits back onto the table
+  const pro = tablePreset('pro-9ft');
+  const s = Math.SQRT1_2;
+  const corner = simulate(
+    [createBall(0, 400 + 42 * s, 400 - 42 * s)],
+    { aimDir: { x: -1, y: -1 }, power: 0.55, tip: { x: 0, y: 0 } },
+    { table: pro },
+  );
+  assert.equal(corner.balls[0].potted, false, 'off-line Pro corner shot rattles out');
+  assert.ok(corner.events.cushionHits.filter((c) => c.wall === 'jaw').length >= 2, 'rattles across both corner jaws');
+  // steep side cut hitting the jaw on Club 9ft rattles across both jaws and pops back out
+  const t = (55 * Math.PI) / 180;
+  const side = simulate(
+    [createBall(0, 1270 + 300 * Math.sin(t) + 25, 300 * Math.cos(t))],
+    { aimDir: { x: -Math.sin(t), y: -Math.cos(t) }, power: 0.45, tip: { x: 0, y: 0 } },
+    { table: tablePreset('club-9ft') },
+  );
+  assert.equal(side.balls[0].potted, false, 'steep side jaw hit rattles out');
+  assert.ok(side.events.cushionHits.filter((c) => c.wall === 'jaw').length >= 2, 'rattles across both side jaws');
+});
+
 test('slower cloth gives a shorter roll distance', () => {
   const run = (muRoll) => {
     const table = { ...tablePreset('club-9ft'), muRoll };
@@ -248,9 +270,14 @@ test('slower cloth gives a shorter roll distance', () => {
   assert.ok(fast > slow + 50, `fast ${fast} vs slow ${slow}`);
   // presets: bar cloth (slow) rolls shorter than pro cloth (fast) on the same shot
   const shot = { aimDir: { x: 1, y: 0 }, power: 0.12, tip: { x: 0, y: 0 } };
-  const pro = simulate([createBall(0, 300, 495)], shot, { table: tablePreset('pro-9ft'), maxTime: 30 });
-  const bar = simulate([createBall(0, 300, 495)], shot, { table: tablePreset('bar-7ft'), maxTime: 30 });
-  assert.ok(pro.balls[0].pos.x > bar.balls[0].pos.x);
+  const rolledDist = (table) => {
+    const r = simulate([createBall(0, 300, 495)], shot, { table, maxTime: 30, recordPaths: true });
+    const pts = r.balls[0].path;
+    let total = 0;
+    for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    return total;
+  };
+  assert.ok(rolledDist(tablePreset('pro-9ft')) > rolledDist(tablePreset('bar-7ft')));
 });
 
 test('squirt moves the cue ball sideways; compensating the aim reduces the error', () => {
