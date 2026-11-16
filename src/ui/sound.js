@@ -138,6 +138,15 @@ export function createSoundEngine({ initialEnabled = true, onChange = null } = {
     tone({ f0: 112, f1: 62, dur: 0.06, gain: amp * 0.55, type: 'sine', delay: 0.055 });
   }
 
+  /** Celebratory victory fanfare arpeggio */
+  function cheer() {
+    if (!enabled) return;
+    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+    notes.forEach((f, idx) => {
+      tone({ f0: f, dur: 0.2, gain: 0.32, type: 'triangle', delay: idx * 0.1 });
+    });
+  }
+
   return {
     isEnabled: () => enabled,
     setEnabled,
@@ -150,5 +159,6 @@ export function createSoundEngine({ initialEnabled = true, onChange = null } = {
     ballHit,
     cushionHit,
     pocketDrop,
+    cheer,
   };
 }

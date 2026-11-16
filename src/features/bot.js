@@ -62,7 +62,135 @@ export const BOT_DIFFICULTIES = {
     checkScratch: true,
     playerAid: { aim: true, ghost: false, pocket: false, tangent: false, objLineLen: 0, maxAimLen: 200, simpleAim: true },
   },
+  hero: {
+    id: 'hero',
+    label: 'Hero (Tự học)',
+    shortLabel: 'Hero',
+    desc: 'Tự động học hỏi & nâng cấp kỹ năng sau từng cú đánh · Tiến hóa không giới hạn · Kỹ năng Nhảy bi & Massé',
+    aimJitterDeg: 0.06,
+    safeJitterScale: 0.15,
+    breakPower: 0.93,
+    useSolveAim: true,
+    useSpin: true,
+    proSpin: true,
+    checkScratch: true,
+    canJump: true,
+    canMasse: true,
+    playerAid: { aim: true, ghost: false, pocket: false, tangent: false, objLineLen: 0, maxAimLen: 140, simpleAim: true },
+  },
 };
+
+export const HERO_DEFAULT_PROFILE = {
+  name: 'Hero',
+  xp: 22000,
+  level: 13,
+  totalShots: 6929,
+  pots: 4731,
+  misses: 2706,
+  fouls: 1286,
+  scratches: 985,
+  racksWon: 589,
+  racksLost: 1833,
+  runOuts: 65,
+  goldenBreaks: 17,
+  jumpShots: 0,
+  masseShots: 0,
+  canJump: true,
+  canMasse: true,
+  aimJitterDeg: 0.06,
+  safeJitterScale: 0.15,
+  breakPower: 0.93,
+  useSolveAim: true,
+  useSpin: true,
+  proSpin: true,
+  checkScratch: true,
+};
+
+let memoryHeroProfile = null;
+
+export function loadHeroProfile() {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      const raw = localStorage.getItem('bida9-hero-profile');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        return { ...HERO_DEFAULT_PROFILE, ...parsed };
+      }
+    } catch (e) {
+      // fallback
+    }
+  }
+  return memoryHeroProfile ? { ...memoryHeroProfile } : { ...HERO_DEFAULT_PROFILE };
+}
+
+export function saveHeroProfile(profile) {
+  if (typeof localStorage !== 'undefined') {
+    try {
+      localStorage.setItem('bida9-hero-profile', JSON.stringify(profile));
+    } catch (e) {}
+  }
+  memoryHeroProfile = { ...profile };
+}
+
+export function recordHeroProgress(event, details = {}, currentProfile = null) {
+  const p = currentProfile ? { ...currentProfile } : loadHeroProfile();
+  const oldLevel = p.level || Math.floor(Math.sqrt((p.xp || 0) / 120)) + 1;
+
+  if (event === 'shot') {
+    p.totalShots = (p.totalShots || 0) + 1;
+    p.xp = (p.xp || 0) + 1.0;
+  } else if (event === 'pot') {
+    const cnt = details.count || 1;
+    p.pots = (p.pots || 0) + cnt;
+    p.xp = (p.xp || 0) + 2.5 * cnt;
+  } else if (event === 'miss') {
+    p.misses = (p.misses || 0) + 1;
+  } else if (event === 'foul') {
+    p.fouls = (p.fouls || 0) + 1;
+    if (details.scratch) p.scratches = (p.scratches || 0) + 1;
+    p.xp = (p.xp || 0) + 1.5;
+  } else if (event === 'rack_win') {
+    p.racksWon = (p.racksWon || 0) + 1;
+    p.xp = (p.xp || 0) + 6.0;
+  } else if (event === 'rack_lost') {
+    p.racksLost = (p.racksLost || 0) + 1;
+    p.xp = (p.xp || 0) + 2.0;
+  } else if (event === 'run_out') {
+    p.runOuts = (p.runOuts || 0) + 1;
+    p.xp = (p.xp || 0) + 12.0;
+  } else if (event === 'golden_break') {
+    p.goldenBreaks = (p.goldenBreaks || 0) + 1;
+    p.xp = (p.xp || 0) + 10.0;
+  } else if (event === 'jump_shot') {
+    p.jumpShots = (p.jumpShots || 0) + 1;
+    p.xp = (p.xp || 0) + 4.0;
+  } else if (event === 'masse_shot') {
+    p.masseShots = (p.masseShots || 0) + 1;
+    p.xp = (p.xp || 0) + 5.0;
+  }
+
+  const xpDelta = Math.max(0, p.xp - 22000);
+  p.aimJitterDeg = Math.max(0.015, Math.round((0.015 + (0.06 - 0.015) * Math.exp(-xpDelta / 8000)) * 1000) / 1000);
+  p.safeJitterScale = Math.max(0.06, Math.round((0.06 + (0.15 - 0.06) * Math.exp(-xpDelta / 8000)) * 1000) / 1000);
+  p.breakPower = Math.min(0.96, Math.round((0.93 + (0.96 - 0.93) * (1 - Math.exp(-xpDelta / 8000))) * 1000) / 1000);
+  p.useSolveAim = true;
+  p.useSpin = true;
+  p.proSpin = true;
+  p.checkScratch = true;
+
+  const newLevel = Math.floor(Math.sqrt(p.xp / 120)) + 1;
+  p.level = newLevel;
+
+  saveHeroProfile(p);
+
+  return {
+    profile: p,
+    leveledUp: newLevel > oldLevel,
+    oldLevel,
+    newLevel,
+    aimJitter: p.aimJitterDeg,
+  };
+}
 
 export const BOT_GAMES = {
   '9ball': { id: '9ball', label: '9 Bi', rackSize: 9 },
@@ -530,10 +658,166 @@ function findKickOrSafeShot(balls, cue, target, eq, geo) {
 }
 
 /**
+ * Find a jumping stroke over an obstacle ball to hit a legal target.
+ * Used by Hero bot when direct trajectory is blocked.
+ */
+export function findJumpShot(balls, cue, legalTargets, eq, geo) {
+  const rng0 = () => 0.5;
+  let best = null;
+  let bestScore = -Infinity;
+
+  for (const tgt of legalTargets) {
+    const blockerId = isPathBlocked(cue.pos, tgt.pos, balls, R, [0, tgt.id]);
+    if (blockerId === null) continue;
+    const blocker = balls.find((b) => b.id === blockerId);
+    if (!blocker) continue;
+
+    const dBlocker = dist(cue.pos, blocker.pos);
+    const dTarget = dist(cue.pos, tgt.pos);
+    if (dBlocker < 80 || dBlocker >= dTarget - 2 * R) continue;
+
+    const candidateDirs = [norm(sub(tgt.pos, cue.pos))];
+    if (geo?.POCKETS) {
+      for (const pocket of geo.POCKETS) {
+        const aimPt = pocket.aim || pocket;
+        const shot = computeShot(cue.pos, tgt.pos, aimPt, R);
+        if (shot.possible && shot.cutAngleDeg <= 60) {
+          candidateDirs.push(shot.aimDir);
+        }
+      }
+    }
+
+    const allDirs = [];
+    for (const dir of candidateDirs) {
+      allDirs.push(dir);
+      allDirs.push(rotate(dir, rad(-1.2)));
+      allDirs.push(rotate(dir, rad(1.2)));
+    }
+
+    const elevations = [42, 46, 50];
+    const powers = [0.82, 0.88];
+    const tip = { x: 0, y: 0.15 };
+
+    for (const dir of allDirs) {
+      for (const elev of elevations) {
+        for (const power of powers) {
+          const res = simulate(
+            balls,
+            { aimDir: dir, power, tip, elevationDeg: elev },
+            { table: eq.table, cue: eq.cue, rng: rng0, orientation: false, recordPaths: false, maxTime: 5.5 },
+          );
+
+          if (res.events.firstContact === tgt.id && !res.events.potted.includes(0)) {
+            let sc = 6;
+            if (res.events.potted.includes(tgt.id)) sc += 20;
+            sc -= res.events.cushionHits.length * 0.2;
+            if (sc > bestScore) {
+              bestScore = sc;
+              best = {
+                targetId: tgt.id,
+                pocketIdx: res.events.potted.includes(tgt.id) ? 0 : -1,
+                aimDir: dir,
+                power,
+                tip,
+                elevationDeg: elev,
+                kind: 'jump',
+                potted: res.events.potted.includes(tgt.id),
+              };
+              if (sc >= 20) return best;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+/**
+ * Find a curved massé stroke bending around an obstacle ball to hit a legal target.
+ * Uses high elevation (60-72 deg) with strong side english.
+ */
+export function findMasseShot(balls, cue, legalTargets, eq, geo) {
+  const rng0 = () => 0.5;
+  let best = null;
+  let bestScore = -Infinity;
+
+  for (const tgt of legalTargets) {
+    const blockerId = isPathBlocked(cue.pos, tgt.pos, balls, R, [0, tgt.id]);
+    if (blockerId === null) continue;
+
+    const baseAng = Math.atan2(tgt.pos.y - cue.pos.y, tgt.pos.x - cue.pos.x);
+
+    const curveConfigs = [
+      { tip: { x: 0.44, y: -0.22 }, offsets: [10, 16, 22, 28, 34, 40] },
+      { tip: { x: -0.44, y: -0.22 }, offsets: [-10, -16, -22, -28, -34, -40] },
+    ];
+
+    const elevations = [60, 66, 72];
+    const powers = [0.58, 0.68];
+
+    for (const cfg of curveConfigs) {
+      for (const off of cfg.offsets) {
+        const ang = baseAng + rad(off);
+        const dir = { x: Math.cos(ang), y: Math.sin(ang) };
+
+        for (const elev of elevations) {
+          for (const power of powers) {
+            const res = simulate(
+              balls,
+              { aimDir: dir, power, tip: cfg.tip, elevationDeg: elev },
+              { table: eq.table, cue: eq.cue, rng: rng0, orientation: false, recordPaths: false, maxTime: 6.5 },
+            );
+
+            if (res.events.firstContact === tgt.id && !res.events.potted.includes(0)) {
+              let sc = 5;
+              if (res.events.potted.includes(tgt.id)) sc += 20;
+              sc -= res.events.cushionHits.length * 0.2;
+              if (sc > bestScore) {
+                bestScore = sc;
+                best = {
+                  targetId: tgt.id,
+                  pocketIdx: res.events.potted.includes(tgt.id) ? 0 : -1,
+                  aimDir: dir,
+                  power,
+                  tip: cfg.tip,
+                  elevationDeg: elev,
+                  kind: 'masse',
+                  potted: res.events.potted.includes(tgt.id),
+                };
+                if (sc >= 20) return best;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return best;
+}
+
+/**
  * Choose the Bot's shot for 9-ball or 8-ball (`opts.game = '9ball' | '8ball'`, `opts.group`).
  */
 export function chooseBotShot(balls, geo, eq, difficulty = 'medium', opts = {}) {
-  const diff = BOT_DIFFICULTIES[difficulty] || BOT_DIFFICULTIES.medium;
+  let diff;
+  if (typeof difficulty === 'object' && difficulty !== null) {
+    diff = difficulty;
+  } else if (difficulty === 'hero') {
+    const hero = loadHeroProfile();
+    diff = {
+      ...BOT_DIFFICULTIES.hero,
+      aimJitterDeg: hero.aimJitterDeg ?? 0.015,
+      safeJitterScale: hero.safeJitterScale ?? 0.06,
+      breakPower: hero.breakPower ?? 0.96,
+      canJump: hero.canJump ?? true,
+      canMasse: hero.canMasse ?? true,
+    };
+  } else {
+    diff = BOT_DIFFICULTIES[difficulty] || BOT_DIFFICULTIES.medium;
+  }
   const game = opts.game === '8ball' ? '8ball' : '9ball';
   const group = game === '8ball' ? (opts.group ?? null) : null;
   const rng = opts.rng || Math.random;
@@ -666,6 +950,34 @@ export function chooseBotShot(balls, geo, eq, difficulty = 'medium', opts = {}) 
       elevationDeg: effectiveCueElevationDeg(DEFAULT_ELEVATION_DEG, cue.pos, finalAim, chosen.tip, geo, { pull: 50 + chosen.power * 200, balls }),
       kind: 'pot',
     };
+  }
+
+  // When snookered / no direct clean pocket:
+  // If Hero bot (canJump / canMasse), attempt trick shots to jump or curve around blockers!
+  if (diff.canJump || diff.canMasse) {
+    let trickShot = null;
+    if (diff.canJump) {
+      trickShot = findJumpShot(balls, cue, legalTargets, eq, geo);
+    }
+    if ((!trickShot || !trickShot.potted) && diff.canMasse) {
+      const masse = findMasseShot(balls, cue, legalTargets, eq, geo);
+      if (masse && (!trickShot || masse.potted || rng() < 0.5)) {
+        trickShot = masse;
+      }
+    }
+    if (trickShot) {
+      const jitterDeg = (rng() - 0.5) * 2 * diff.aimJitterDeg * 0.4;
+      const finalAim = rotate(trickShot.aimDir, rad(jitterDeg));
+      return {
+        targetId: trickShot.targetId,
+        pocketIdx: trickShot.pocketIdx ?? -1,
+        aimDir: finalAim,
+        power: trickShot.power,
+        tip: trickShot.tip,
+        elevationDeg: trickShot.elevationDeg,
+        kind: trickShot.kind,
+      };
+    }
   }
 
   // No clean direct pocket: play kick / bank / safety contact against best reachable legal ball

@@ -85,6 +85,8 @@ export function createBall(id, x = 0, y = 0) {
   return attachGetters({
     id,
     pos: { x, y },
+    z: 0,
+    vz: 0,
     vel: { x: 0, y: 0 },
     w: { x: 0, y: 0, z: 0 },
     q: quatIdentity(),
@@ -100,6 +102,8 @@ export function cloneBall(b) {
   return attachGetters({
     id: b.id,
     pos: { x: b.pos.x, y: b.pos.y },
+    z: b.z ? b.z : 0,
+    vz: b.vz ? b.vz : 0,
     vel: { x: b.vel ? b.vel.x : 0, y: b.vel ? b.vel.y : 0 },
     w,
     q: b.q ? { w: b.q.w, x: b.q.x, y: b.q.y, z: b.q.z } : quatIdentity(),
@@ -173,12 +177,19 @@ export function computeLaunch(aimDir, power, tip = { x: 0, y: 0 }, cue = default
   const pxj = cross3(p, { x: dc.x * jm, y: dc.y * jm, z: dc.z * jm });
   const k = cue.spinEfficiency / (0.4 * R * R);
   const w = { x: pxj.x * k + 0, y: pxj.y * k + 0, z: pxj.z * k + 0 };
+  let vz = 0;
+  let speed = full;
+  if (elev >= 30 && power >= 0.52 && ty >= -0.35) {
+    vz = full * Math.sin(th) * 0.52;
+    speed = full * Math.cos(th) * 0.72;
+  }
   return {
     dir,
-    speed: full,
+    speed,
     w,
     spin: { x: -R * w.y + 0, y: R * w.x + 0 },
     side: -R * w.z + 0,
+    vz,
     miscue: false,
     squirtDeg: sq,
     stick,
@@ -191,6 +202,8 @@ export function strike(ball, aimDir, power, tip = { x: 0, y: 0 }, cue = defaultC
   const L = computeLaunch(aimDir, power, tip, cue, rng, elevationDeg);
   ball.vel = { x: L.dir.x * L.speed, y: L.dir.y * L.speed };
   ball.w = { x: L.w.x, y: L.w.y, z: L.w.z };
+  ball.z = 0;
+  ball.vz = L.vz || 0;
   return L;
 }
 
@@ -252,7 +265,7 @@ export class Sim {
   isMoving() {
     for (const b of this.balls) {
       if (b.potted) continue;
-      if (b.vel.x !== 0 || b.vel.y !== 0 || b.w.x !== 0 || b.w.y !== 0) return true;
+      if (b.vel.x !== 0 || b.vel.y !== 0 || b.w.x !== 0 || b.w.y !== 0 || (b.z && b.z > 0) || (b.vz && b.vz !== 0)) return true;
     }
     return false;
   }
@@ -313,6 +326,18 @@ export class Sim {
   }
 
   _move(b, dt) {
+    if ((b.vz && b.vz !== 0) || (b.z && b.z > 0)) {
+      b.z = (b.z || 0) + b.vz * dt;
+      b.vz -= G * dt;
+      if (b.z <= 0) {
+        b.z = 0;
+        if (b.vz < -250) {
+          b.vz = -b.vz * 0.28;
+        } else {
+          b.vz = 0;
+        }
+      }
+    }
     const v = b.vel;
     const w = b.w;
     if (v.x === 0 && v.y === 0 && w.x === 0 && w.y === 0) {
@@ -381,23 +406,29 @@ export class Sim {
         if (a.vel.x === 0 && a.vel.y === 0 && b.vel.x === 0 && b.vel.y === 0) continue;
         let dx = b.pos.x - a.pos.x;
         let dy = b.pos.y - a.pos.y;
-        const d2 = dx * dx + dy * dy;
-        if (d2 >= min2) continue;
+        const az = a.z || 0;
+        const bz = b.z || 0;
+        const dz = bz - az;
+        const d2_3d = dx * dx + dy * dy + dz * dz;
+        if (d2_3d >= min2) continue;
         // Sub-step impact time: back both balls up to the exact moment their centres were 2R apart,
         // resolve the collision there, then advance with the new velocities (removes the +-v*dt contact jitter).
         let tau = 0;
         {
           const rvx = a.vel.x - b.vel.x;
           const rvy = a.vel.y - b.vel.y;
-          const rr = rvx * rvx + rvy * rvy;
-          const bq = -(dx * rvx + dy * rvy); // dpos . rel with dpos = a - b = -(dx,dy)
+          const rvz = (a.vz || 0) - (b.vz || 0);
+          const rr = rvx * rvx + rvy * rvy + rvz * rvz;
+          const bq = -(dx * rvx + dy * rvy + dz * rvz); // dpos . rel with dpos = a - b = -(dx,dy,dz)
           if (rr > 1e-9 && bq < 0) {
-            const disc = bq * bq - rr * (d2 - min2);
+            const disc = bq * bq - rr * (d2_3d - min2);
             tau = Math.min(2 * this.dt, Math.max(0, (bq + Math.sqrt(Math.max(0, disc))) / rr));
             a.pos.x -= a.vel.x * tau;
             a.pos.y -= a.vel.y * tau;
+            if (a.z) a.z = Math.max(0, a.z - (a.vz || 0) * tau);
             b.pos.x -= b.vel.x * tau;
             b.pos.y -= b.vel.y * tau;
+            if (b.z) b.z = Math.max(0, b.z - (b.vz || 0) * tau);
             dx = b.pos.x - a.pos.x;
             dy = b.pos.y - a.pos.y;
           }

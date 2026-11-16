@@ -363,14 +363,26 @@ export function createRenderer(canvas, opts = {}) {
   }
 
   function drawBallBody(b, r, withText, shade = 0) {
-    const { x, y } = b.pos;
+    let { x, y } = b.pos;
+    const bz = b.z || 0;
     const q = b.q || IDENT_Q;
-    // shadow (shrinks/fades as ball drops into the pocket)
+    // shadow (shrinks/fades as ball drops into the pocket or softens as ball hops in the air)
     if (shade < 0.7) {
-      ctx.fillStyle = `rgba(0,0,0,${(0.28 * (1 - shade)).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(x + r * 0.14 * (1 - shade), y + r * 0.14 * (1 - shade), r, 0, Math.PI * 2);
-      ctx.fill();
+      if (bz > 0) {
+        const shadowAlpha = Math.max(0.08, 0.28 * Math.exp(-bz / (2 * R)));
+        const shadowSpread = 1 + Math.min(0.4, bz / (3 * R));
+        ctx.fillStyle = `rgba(0,0,0,${shadowAlpha.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(x + r * 0.14, y + r * 0.14 + bz * 0.1, r * shadowSpread, 0, Math.PI * 2);
+        ctx.fill();
+        y -= bz * 0.35;
+        r *= 1 + Math.min(0.22, bz / (4 * R));
+      } else {
+        ctx.fillStyle = `rgba(0,0,0,${(0.28 * (1 - shade)).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(x + r * 0.14 * (1 - shade), y + r * 0.14 * (1 - shade), r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.save();
     ctx.beginPath();
@@ -595,7 +607,7 @@ export function createRenderer(canvas, opts = {}) {
   function drawOverlays(scene) {
     const o = scene.overlays;
     const info = scene.info;
-    if (!info) return;
+    if (!info || (!o.aim && !o.actual && !o.ghost && !o.pocket && !o.tangent && !o.roll)) return;
     ctx.lineCap = 'round';
     const blocked = info.blockedCue !== null;
     const hasGhost = !!info.ghost;

@@ -94,6 +94,8 @@ export function keyAction(e) {
       return { type: 'tip', dx: 0, dy: -1, step: tipStep(e) };
     case 'c':
       return { type: 'tipCentre' };
+    case 'b':
+      return { type: 'toggleSide' };
     case ' ':
     case 'Spacebar':
       return { type: 'shoot' };
@@ -113,6 +115,8 @@ export function keyAction(e) {
       return { type: 'random' };
     case 'f':
       return { type: 'predict' };
+    case 'l':
+      return { type: 'toggleAimAid' };
     case 'v':
       return { type: 'view' };
     case 'k':
@@ -236,9 +240,11 @@ export const KEY_HELP = [
   { keys: 'R', desc: 'Đặt lại (về vị trí trước cú đánh)' },
   { keys: 'N', desc: 'Ngẫu nhiên (chế độ Tự do)' },
   { keys: 'F', desc: 'Bật / tắt dự đoán đường đi' },
+  { keys: 'L', desc: 'Bật / tắt tia ngắm hỗ trợ (Góc nhìn thực tế)' },
   { keys: 'Lăn chuột trên bàn', desc: 'Xoay hướng ngắm 0,1° mỗi nấc (Shift 1°)' },
   { keys: 'V', desc: 'Chuyển góc nhìn 2D / 3D "Mắt cơ thủ"' },
-  { keys: 'K', desc: 'Camera 3D: Tự động (trên cao khi bi chạy) → Cố định → Theo bi cái' },
+  { keys: 'B', desc: 'Ẩn / hiện bảng điều khiển (Toàn màn hình bàn bida)' },
+  { keys: 'K', desc: 'Camera 3D: Tự động → Quay TV → Theo bi cái → Cố định' },
   { keys: '[  /  ]', desc: 'Camera 3D: hạ / nâng độ cao mắt (Shift bước lớn)' },
   { keys: '-  /  =', desc: 'Camera 3D: lùi xa / tiến gần bi cái (Shift bước lớn); lăn chuột hoặc chụm 2 ngón cũng zoom' },
   { keys: 'H  hoặc  ?', desc: 'Hiện / ẩn bảng trợ giúp này' },
@@ -489,6 +495,20 @@ export function createKeyboard({ api, stage, canvas, onLayout = () => {} }) {
       case 'view':
         showBadge(api.toggleView());
         break;
+      case 'toggleSide': {
+        const collapsed = api.toggleSide?.();
+        if (collapsed !== undefined && collapsed !== null) {
+          showBadge(collapsed ? 'Toàn màn hình bàn bida' : 'Mở bảng điều khiển');
+        }
+        break;
+      }
+      case 'toggleAimAid': {
+        const on = api.toggleAimAid?.();
+        if (on !== undefined && on !== null) {
+          showBadge(on ? 'Tia ngắm: Bật' : 'Chế độ thực tế (Tắt tia)');
+        }
+        break;
+      }
       case 'camMode':
         showBadge(api.camMode());
         break;

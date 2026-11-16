@@ -3,7 +3,7 @@
 import { createSpinPad } from './input.js';
 import { BALL_COLORS } from './render.js';
 import { FULLNESS_LABELS } from '../core/geometry.js';
-import { BOT_DIFFICULTIES, BOT_GAMES } from '../features/bot.js';
+import { BOT_DIFFICULTIES, BOT_GAMES, loadHeroProfile } from '../features/bot.js';
 
 const $ = (id) => document.getElementById(id);
 export const fmtDeg = (d, digits = 1) => `${Number(d).toFixed(digits).replace('.', ',')}°`;
@@ -96,6 +96,13 @@ export function createPanel(h) {
   }
 
   const syncLobbyDesc = (diff) => {
+    if (diff === 'hero') {
+      const hero = loadHeroProfile();
+      if ($('lobbyDiffDesc')) {
+        $('lobbyDiffDesc').textContent = `🌟 Hero Cấp ${hero.level || 13} (${Math.round(hero.xp || 22000).toLocaleString('vi-VN')} XP) · Lệch ngắm: ${(hero.aimJitterDeg || 0.06).toFixed(2)}° · Skills: 🦘 Nhảy bi | 🌀 Massé`;
+      }
+      return;
+    }
     const info = BOT_DIFFICULTIES[diff] || BOT_DIFFICULTIES.medium;
     if ($('lobbyDiffDesc')) $('lobbyDiffDesc').textContent = info.desc;
   };
@@ -130,22 +137,48 @@ export function createPanel(h) {
       }
     });
   }
-  $('btnStartBot')?.addEventListener('click', () => h.onStartBot?.(lobbyDiff, lobbyGame));
+  $('btnStartBot')?.addEventListener('click', () => {
+    const raceTo = parseInt($('lobbyBotRace')?.value || '5', 10);
+    h.onStartBot?.(lobbyDiff, lobbyGame, raceTo);
+  });
   $('btnStartBvb')?.addEventListener('click', () => {
     const name1 = $('bvbName1')?.value?.trim() || 'Alpha';
     const name2 = $('bvbName2')?.value?.trim() || 'Beta';
     const diff1 = $('bvbDiff1')?.value || 'hard';
     const diff2 = $('bvbDiff2')?.value || 'pro';
-    h.onStartBvb?.({ name1, name2, diff1, diff2, game: lobbyBvbGame });
+    const raceTo = parseInt($('lobbyBvbRace')?.value || '5', 10);
+    h.onStartBvb?.({ name1, name2, diff1, diff2, game: lobbyBvbGame, raceTo });
   });
+  $('lobbyBvbAimAid')?.addEventListener('change', () => h.onToggleAimAid?.());
+  $('lobbyBotAimAid')?.addEventListener('change', () => h.onToggleAimAid?.());
   $('btnStartPractice')?.addEventListener('click', () => h.onStartPractice?.());
   $('botDiff')?.addEventListener('change', (e) => h.onBotDifficulty?.(e.target.value));
+  $('botRace')?.addEventListener('change', (e) => {
+    const raceTo = parseInt(e.target.value || '0', 10);
+    h.onBotRace?.(raceTo);
+  });
   $('botGame')?.addEventListener('change', (e) => h.onBotGame?.(e.target.value));
   $('btnNewMatch')?.addEventListener('click', () => h.onNewMatch?.());
+
+  // Match Win Celebration controls
+  $('btnMatchWinRematch')?.addEventListener('click', () => {
+    setMatchWin(false);
+    h.onNewMatch?.();
+  });
+  $('btnMatchWinKeepPlaying')?.addEventListener('click', () => {
+    setMatchWin(false);
+    h.onKeepPlaying?.();
+  });
+  $('btnMatchWinLobby')?.addEventListener('click', () => {
+    setMatchWin(false);
+    setLobbyOpen(true);
+  });
 
   // BvB in-game controls
   $('btnBvbPause')?.addEventListener('click', () => h.onBvbPause?.());
   $('btnBvbSpeed')?.addEventListener('click', () => h.onBvbSpeed?.());
+  $('btnBvbCam')?.addEventListener('click', () => h.onCycleCam?.());
+  $('btnBvbAimAid')?.addEventListener('click', () => h.onToggleAimAid?.());
 
   const openRename = () => {
     const modal = $('renameModal');
@@ -315,13 +348,29 @@ export function createPanel(h) {
   }
 
   function setAppMode(appMode) {
-    document.body.dataset.app = appMode;
-    for (const b of document.querySelectorAll('#mainModes button')) b.classList.toggle('active', b.dataset.app === appMode);
+    document.body.dataset.app = appMode === 'hero' ? 'bot' : appMode;
+    for (const b of document.querySelectorAll('#mainModes button')) {
+      b.classList.toggle('active', b.dataset.app === appMode);
+    }
   }
 
   function setLobbyOpen(open) {
     const el = $('lobby');
     if (el) el.hidden = !open;
+  }
+
+  function setMatchWin(show, details = {}) {
+    const el = $('matchWinModal');
+    if (!el) return;
+    el.hidden = !show;
+    if (show) {
+      if (details.title && $('matchWinTitle')) $('matchWinTitle').textContent = details.title;
+      if (details.desc && $('matchWinDesc')) $('matchWinDesc').textContent = details.desc;
+      if (details.name1 && $('winName1')) $('winName1').textContent = details.name1;
+      if (details.name2 && $('winName2')) $('winName2').textContent = details.name2;
+      if (details.score1 !== undefined && $('winScore1')) $('winScore1').textContent = String(details.score1);
+      if (details.score2 !== undefined && $('winScore2')) $('winScore2').textContent = String(details.score2);
+    }
   }
 
   let currentBot1Name = 'Alpha';
@@ -336,6 +385,7 @@ export function createPanel(h) {
     speed = 1,
     scorePlayer,
     scoreBot,
+    raceTo = 0,
     turn,
     game = '9ball',
     difficulty,
@@ -351,9 +401,18 @@ export function createPanel(h) {
     if ($('botScoreBot')) $('botScoreBot').textContent = String(scoreBot);
     if ($('botGame') && game) $('botGame').value = game;
     if ($('botDiff') && difficulty) $('botDiff').value = difficulty;
+    if ($('botRace') && raceTo !== undefined) $('botRace').value = String(raceTo || 0);
+    if ($('botRacePill')) $('botRacePill').textContent = raceTo > 0 ? `Chạm ${raceTo}` : 'Tự do';
 
     const isBvb = matchType === 'bvb';
     const gameLabel = (BOT_GAMES[game] || BOT_GAMES['9ball']).label;
+    const hero = loadHeroProfile();
+    const heroLabel = (d, name) => {
+      if (d?.id === 'hero' || (name && name.toLowerCase().includes('hero'))) {
+        return `Hero Lvl ${hero.level || 13} · ${(hero.aimJitterDeg || 0.06).toFixed(2)}°`;
+      }
+      return d?.shortLabel || d?.label || '';
+    };
 
     if ($('bvbControls')) $('bvbControls').hidden = !isBvb;
     if ($('botDiffWrap')) $('botDiffWrap').hidden = isBvb;
@@ -362,13 +421,16 @@ export function createPanel(h) {
       const d1 = BOT_DIFFICULTIES[bot1Diff] || BOT_DIFFICULTIES.hard;
       const d2 = BOT_DIFFICULTIES[bot2Diff] || BOT_DIFFICULTIES.pro;
       if ($('botName1')) {
-        $('botName1').textContent = `${bot1Name} (${d1.shortLabel || d1.label})`;
+        $('botName1').textContent = `${bot1Name} (${heroLabel(d1, bot1Name)})`;
         $('botName1').classList.add('editable-name');
       }
       if ($('botName2')) {
-        $('botName2').textContent = `${bot2Name} (${d2.shortLabel || d2.label})`;
+        $('botName2').textContent = `${bot2Name} (${heroLabel(d2, bot2Name)})`;
         $('botName2').classList.add('editable-name');
       }
+      const isShooter1 = turn === 'bot1' || turn === 'player';
+      $('botName1')?.parentElement?.classList.toggle('is-shooting', isShooter1);
+      $('botName2')?.parentElement?.classList.toggle('is-shooting', !isShooter1);
       const tp = $('botTurnPill');
       if (tp) {
         const currentShooter = turn === 'bot1' ? bot1Name : bot2Name;
@@ -379,7 +441,7 @@ export function createPanel(h) {
         $('btnBvbPause').textContent = paused ? '▶ Tiếp tục' : '⏸ Tạm dừng';
       }
       if ($('btnBvbSpeed')) {
-        $('btnBvbSpeed').textContent = speed === 2 ? '⚡ 2x' : '⚡ 1x';
+        $('btnBvbSpeed').textContent = speed === 4 ? '⚡ 4x' : speed === 2 ? '⚡ 2x' : '⚡ 1x';
       }
     } else {
       const diffInfo = BOT_DIFFICULTIES[difficulty] || BOT_DIFFICULTIES.medium;
@@ -388,9 +450,12 @@ export function createPanel(h) {
         $('botName1').classList.remove('editable-name');
       }
       if ($('botName2')) {
-        $('botName2').textContent = `Bot ${gameLabel} (${diffInfo.shortLabel || diffInfo.label})`;
+        $('botName2').textContent = `Bot ${gameLabel} (${heroLabel(diffInfo, 'bot')})`;
         $('botName2').classList.remove('editable-name');
       }
+      const isShooter1 = turn === 'player';
+      $('botName1')?.parentElement?.classList.toggle('is-shooting', isShooter1);
+      $('botName2')?.parentElement?.classList.toggle('is-shooting', !isShooter1);
       const tp = $('botTurnPill');
       if (tp) {
         tp.textContent = turn === 'bot' ? (thinking ? '🤖 Bot đang ngắm...' : '🤖 Lượt Bot') : 'Lượt bạn';
@@ -399,8 +464,12 @@ export function createPanel(h) {
     }
 
     if ($('lobbyDiffDesc')) {
-      const diffInfo = BOT_DIFFICULTIES[difficulty] || BOT_DIFFICULTIES.medium;
-      $('lobbyDiffDesc').textContent = diffInfo.desc;
+      if (difficulty === 'hero') {
+        $('lobbyDiffDesc').textContent = `🌟 Hero Cấp ${hero.level || 13} (${Math.round(hero.xp || 22000).toLocaleString('vi-VN')} XP) · Lệch ngắm: ${(hero.aimJitterDeg || 0.06).toFixed(2)}° · Skills: 🦘 Nhảy bi | 🌀 Massé`;
+      } else {
+        const diffInfo = BOT_DIFFICULTIES[difficulty] || BOT_DIFFICULTIES.medium;
+        $('lobbyDiffDesc').textContent = diffInfo.desc;
+      }
     }
     if ($('botTargetPill')) {
       $('botTargetPill').textContent = targetLabel || (targetId ? `Bi #${targetId}` : 'Hết bi');
@@ -505,6 +574,7 @@ export function createPanel(h) {
     setActiveTab,
     setAppMode,
     setLobbyOpen,
+    setMatchWin,
     setBotHud,
     setTurnLocked: (locked) => {
       $('power').disabled = !!locked;

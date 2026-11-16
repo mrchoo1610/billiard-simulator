@@ -162,8 +162,10 @@ test('camera director: eye -> hold -> top-down -> hold -> eye, scratch hold, inp
   e.update({ shooting: false }, 900);
   r = e.update({ shooting: false, userInput: true }, 1000);
   assert.equal(r.state, 'eye'); assert.equal(r.blend, 0);
-  assert.equal(nextCameraMode('auto'), 'fixed');
-  assert.equal(nextCameraMode('follow'), 'auto');
+  assert.equal(nextCameraMode('auto'), 'orbit');
+  assert.equal(nextCameraMode('orbit'), 'follow');
+  assert.equal(nextCameraMode('follow'), 'fixed');
+  assert.equal(nextCameraMode('fixed'), 'auto');
 });
 
 test('cushion frames are right-handed for every rail segment of every table', () => {

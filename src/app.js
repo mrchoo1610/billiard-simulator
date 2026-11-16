@@ -4,7 +4,7 @@ import { computeShot, bestPocket, isPathBlocked, firstHit, effectiveCueElevation
 import { createBall, createSim, simulate, computeLaunch, DEFAULT_ELEVATION_DEG } from './core/physics.js';
 import { physicsEquipmentKey } from './core/equipment.js';
 import { solveAim } from './core/aim-solver.js';
-import { createRenderer } from './ui/render.js';
+import { createRenderer, BALL_COLORS } from './ui/render.js';
 import { createInput, placeBall } from './ui/input.js';
 import { createPanel, tipText, fmtDeg } from './ui/panel.js';
 import { createSettings } from './ui/settings.js';
@@ -21,6 +21,9 @@ import {
   placeCueBallForBot,
   chooseBotShot,
   lowestBallId,
+  loadHeroProfile,
+  saveHeroProfile,
+  recordHeroProgress,
 } from './features/bot.js';
 import { rotate, rad, deg, dist, clamp } from './core/vec.js';
 import { CAMERA_MODES, CAMERA_MODE_LABEL, nextCameraMode } from './ui/view3d-math.js'; // pure; three.js itself is only fetched on first 3D open
@@ -31,6 +34,21 @@ const PRED_INTERVAL = 50; // ms between prediction recomputes while dragging
 const PRED_MAX_TIME = 5; // seconds of predicted motion
 const noMiscueRng = () => 0.5; // prediction never randomises the miscue angle
 const SOLVE_INTERVAL = 90; // ms: minimum gap between aim-solver runs while the state keeps changing
+
+const lsRead = (k) => {
+  try {
+    return localStorage.getItem(k);
+  } catch (e) {
+    return null;
+  }
+};
+const lsWrite = (k, v) => {
+  try {
+    localStorage.setItem(k, v);
+  } catch (e) {
+    /* ignore */
+  }
+};
 
 const state = {
   balls: [],
@@ -43,6 +61,7 @@ const state = {
   aimOffset: 0, // auto aim: +-5 degrees from the ghost-ball line
   aimMode: 'auto', // 'auto' (ghost ball to target/pocket) | 'manual' (free aim at aimAngle)
   aimAngle: 0, // manual aim direction, degrees in world coordinates (atan2(y, x))
+  aimAid: lsRead('bida9-aim-aid') !== '0', // true = assistance lines, false = realistic view (no aid lines)
   overlays: { aim: true, actual: true, ghost: true, pocket: true, tangent: true, roll: false, predict: true },
   appMode: 'practice', // 'bot' | 'practice'
   practiceMode: 'free',
@@ -67,6 +86,8 @@ const state = {
     speed: 1, // 1 | 2
     game: '9ball',
     difficulty: 'medium',
+    raceTo: 5, // Race to win target racks (0 = Endless/Free)
+    matchOver: false,
     groups: { player: null, bot: null, bot1: null, bot2: null },
     scorePlayer: 0,
     scoreBot: 0,
@@ -92,20 +113,6 @@ const canvas = document.getElementById('table');
 const renderer = createRenderer(canvas);
 
 /* 3D view state (Phase 6): ui/render3d.js + three.js are imported lazily by setView('3d'). */
-const lsRead = (k) => {
-  try {
-    return localStorage.getItem(k);
-  } catch (e) {
-    return null;
-  }
-};
-const lsWrite = (k, v) => {
-  try {
-    localStorage.setItem(k, v);
-  } catch (e) {
-    /* ignore */
-  }
-};
 const canvas3d = document.getElementById('table3d');
 const miniCanvas = document.getElementById('minimap');
 const STROKE_MS = 120;
@@ -145,10 +152,20 @@ function botDiffOf(who) {
   return state.bot.difficulty || 'medium';
 }
 
+function isHeroWho(who) {
+  if (state.mode !== 'bot') return false;
+  const diff = botDiffOf(who);
+  if (diff === 'hero') return true;
+  const name = (botNameOf(who) || '').toLowerCase();
+  return name.includes('hero');
+}
+
 function clearBotTimers() {
   for (const id of state.bot.timers) clearTimeout(id);
   state.bot.timers = [];
   state.bot.thinking = false;
+  state.bot.feathering = false;
+  state.bot.featherPower = null;
 }
 
 function addBotTimer(fn, ms) {
@@ -318,6 +335,9 @@ let lastPred = 0;
 let rafId = 0;
 
 function effOverlays() {
+  if (state.aimAid === false) {
+    return { aim: false, actual: false, ghost: false, pocket: false, tangent: false, roll: false, predict: false };
+  }
   const o = state.overlays;
   if (state.mode === 'bot') {
     if (isBotTurn()) {
@@ -356,7 +376,7 @@ function effOverlays() {
   return o;
 }
 
-const baseElevation = () => (state.mode === 'free' ? state.elevation : DEFAULT_ELEVATION_DEG);
+const baseElevation = () => (state.mode === 'bot' && state.botElevation != null ? state.botElevation : (state.mode === 'free' ? state.elevation : DEFAULT_ELEVATION_DEG));
 function currentAimDir() {
   if (state.aimMode === 'manual') {
     return { x: Math.cos(rad(state.aimAngle)), y: Math.sin(rad(state.aimAngle)) };
@@ -646,7 +666,7 @@ function buildScene() {
   const curDiff = isBvbMode() ? botDiffOf(state.bot.turn) : state.bot.difficulty;
   const botAid = state.mode === 'bot' ? botAidFor(curDiff) : null;
   let sceneTargetId = info && info.manual ? info.objId : state.targetId;
-  let sceneShowTarget = !shooting && state.mode !== 'thickness';
+  let sceneShowTarget = state.aimAid !== false && !shooting && state.mode !== 'thickness';
   if (state.mode === 'bot') {
     if (state.bot.game === '8ball') {
       const legal = eightBallTargetIds(state.balls, state.bot.groups[state.bot.turn]);
@@ -665,12 +685,13 @@ function buildScene() {
     drops: shooting ? dropAnims : null,
     targetId: sceneTargetId,
     showTarget: sceneShowTarget,
+    isBot: state.mode === 'bot' && (isBotTurn() || isBvbMode()),
     simpleAim: botAid ? botAid.simpleAim : false,
     objLineLen: botAid && botAid.objLineLen ? botAid.objLineLen : 500,
     stick: stickOn
-      ? { pos: info.cue, dir: info.aimDir, power: state.power, tip: state.tip, elevationDeg: elevation(info.aimDir), cue: eq ? eq.cue : null }
+      ? { pos: info.cue, dir: info.aimDir, power: (state.bot && state.bot.featherPower != null) ? state.bot.featherPower : state.power, tip: state.tip, elevationDeg: elevation(info.aimDir), cue: eq ? eq.cue : null }
       : null,
-    showPocketRing: !shooting && state.mode === 'thickness',
+    showPocketRing: state.aimAid !== false && !shooting && state.mode === 'thickness',
     overlays: shooting
       ? { aim: false, actual: false, ghost: false, pocket: false, tangent: false, roll: false, predict: false }
       : effOverlays(),
@@ -934,9 +955,42 @@ function finishShot() {
     const nameWas = botNameOf(turnWas);
     const nameOpp = botNameOf(opp);
 
+    const turnWasHero = isHeroWho(turnWas);
+    if (turnWasHero) {
+      recordHeroProgress('shot');
+      if (state.botLastShotKind === 'jump') {
+        recordHeroProgress('jump_shot');
+        if (!res.foul) toast('🦘 Hero thực hiện thành công cú Nhảy bi qua vật cản!', 'ok');
+      } else if (state.botLastShotKind === 'masse') {
+        recordHeroProgress('masse_shot');
+        if (!res.foul) toast('🌀 Hero thực hiện thành công cú Massé xoáy cong qua vật cản!', 'ok');
+      }
+      if (res.pottedObj && res.pottedObj.length > 0) {
+        recordHeroProgress('pot', { count: res.pottedObj.length });
+      } else {
+        recordHeroProgress('miss');
+      }
+      if (res.foul) {
+        recordHeroProgress('foul', { scratch: res.cuePotted });
+      }
+    }
+    state.botLastShotKind = null;
+    state.botElevation = null;
+
     if (res.winRack || res.loseRack) {
       const rackWinner = res.winRack ? turnWas : opp;
       const winnerName = botNameOf(rackWinner);
+      if (isHeroWho(rackWinner)) {
+        if (state.bot.onBreak) recordHeroProgress('golden_break');
+        const prog = recordHeroProgress('rack_win');
+        if (prog.leveledUp) {
+          toast(`🌟 [HERO LÊN CẤP ${prog.newLevel}] Kỹ năng tăng tiến! Sai số ngắm giảm còn ${prog.aimJitter}°!`, 'ok');
+        }
+      }
+      const rackLoser = res.winRack ? opp : turnWas;
+      if (isHeroWho(rackLoser)) {
+        recordHeroProgress('rack_lost');
+      }
       if (rackWinner === 'player' || rackWinner === 'bot1') state.bot.scorePlayer += 1;
       else state.bot.scoreBot += 1;
       state.bot.turn = rackWinner;
@@ -945,26 +999,51 @@ function finishShot() {
       state.bot.ballInHand = false;
       state.bot.isFoul = false;
       const rackNo = state.bot.rack - 1;
-      if (isBvb) {
-        state.bot.statusText = res.loseRack
-          ? `🏆 ${winnerName} thắng ván ${rackNo} (${nameWas} phạm lỗi bi 8)! Chuẩn bị ván mới...`
-          : `🎉 ${winnerName} thắng ván ${rackNo}! Chuẩn bị ván mới...`;
+
+      const raceTo = state.bot.raceTo || 0;
+      const p1Score = state.bot.scorePlayer;
+      const p2Score = state.bot.scoreBot;
+      const matchWon = raceTo > 0 && ((rackWinner === 'player' || rackWinner === 'bot1') ? p1Score >= raceTo : p2Score >= raceTo);
+
+      if (matchWon) {
+        state.bot.matchOver = true;
+        sound.cheer?.();
+        const p1Name = isBvb ? state.bot.bot1Name : 'Bạn';
+        const p2Name = isBvb ? state.bot.bot2Name : (state.bot.difficulty === 'hero' ? 'Hero' : 'Bot');
+        state.bot.statusText = `🏆 TRẬN ĐẤU KẾT THÚC: ${winnerName} chiến thắng chung cuộc (${p1Score} - ${p2Score}, Chạm ${raceTo})!`;
         toast(state.bot.statusText, 'ok');
+        panel.setMatchWin(true, {
+          title: `🏆 ${winnerName} Thắng Chung Cuộc!`,
+          desc: `${winnerName} đã xuất sắc chạm mốc ${raceTo} ván thắng trước!`,
+          name1: p1Name,
+          name2: p2Name,
+          score1: p1Score,
+          score2: p2Score,
+        });
+        syncControls();
+        panel.setTurnLocked(true);
       } else {
-        if (res.loseRack) {
-          state.bot.statusText = turnWas === 'player'
-            ? `🤖 Bạn thua ván ${rackNo} (${res.foulReason})! Chuẩn bị ván mới...`
-            : `🎉 Bot phạm lỗi bi 8 (${res.foulReason}) — Bạn thắng ván ${rackNo}!`;
+        if (isBvb) {
+          state.bot.statusText = res.loseRack
+            ? `🏆 ${winnerName} thắng ván ${rackNo} (${nameWas} phạm lỗi bi 8)! Chuẩn bị ván mới...`
+            : `🎉 ${winnerName} thắng ván ${rackNo}! Chuẩn bị ván mới...`;
+          toast(state.bot.statusText, 'ok');
         } else {
-          state.bot.statusText = rackWinner === 'player'
-            ? `🎉 Bạn thắng ván ${rackNo}! Chuẩn bị ván mới...`
-            : `🤖 Bot thắng ván ${rackNo}! Chuẩn bị ván mới...`;
+          if (res.loseRack) {
+            state.bot.statusText = turnWas === 'player'
+              ? `🤖 Bạn thua ván ${rackNo} (${res.foulReason})! Chuẩn bị ván mới...`
+              : `🎉 Bot phạm lỗi bi 8 (${res.foulReason}) — Bạn thắng ván ${rackNo}!`;
+          } else {
+            state.bot.statusText = rackWinner === 'player'
+              ? `🎉 Bạn thắng ván ${rackNo}! Chuẩn bị ván mới...`
+              : `🤖 Bot thắng ván ${rackNo}! Chuẩn bị ván mới...`;
+          }
+          toast(state.bot.statusText, rackWinner === 'player' ? 'ok' : 'bad');
         }
-        toast(state.bot.statusText, rackWinner === 'player' ? 'ok' : 'bad');
+        syncControls();
+        panel.setTurnLocked(true);
+        addBotTimer(() => startBotRack(rackWinner), Math.round(1500 * delayScale));
       }
-      syncControls();
-      panel.setTurnLocked(true);
-      addBotTimer(() => startBotRack(rackWinner), Math.round(1500 * delayScale));
     } else if (res.foul) {
       const next = opp;
       state.bot.turn = next;
@@ -1171,6 +1250,229 @@ function applyShare(decoded) {
   syncPottedUi();
 }
 
+function formatTipVietnamese(tip) {
+  if (!tip) return 'Tâm bi (bi dừng)';
+  const x = tip.x || 0;
+  const y = tip.y || 0;
+  const ax = Math.abs(x);
+  const ay = Math.abs(y);
+  if (ax < 0.05 && ay < 0.05) return 'Tâm bi (bi dừng)';
+
+  const parts = [];
+  if (ay >= 0.05) {
+    const yPct = Math.round(ay * 100);
+    parts.push(y > 0 ? `Cule +${yPct}%` : `Trô -${yPct}%`);
+  }
+  if (ax >= 0.05) {
+    const xPct = Math.round(ax * 100);
+    parts.push(x > 0 ? `Phê phải +${xPct}%` : `Phê trái -${xPct}%`);
+  }
+  return parts.join(' · ');
+}
+
+function drawSpecTip(tip, miscueLimit = 0.8) {
+  const canvas = document.getElementById('specTipCanvas') || document.getElementById('tvTipCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+  const size = 36;
+  if (canvas.width !== Math.round(size * dpr)) {
+    canvas.width = Math.round(size * dpr);
+    canvas.height = Math.round(size * dpr);
+  }
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, size, size);
+
+  const c = size / 2;
+  const r = c - 2;
+  const MAXR = 0.82;
+
+  // Ball sphere gradient
+  const g = ctx.createRadialGradient(c - r * 0.35, c - r * 0.35, r * 0.1, c, c, r);
+  g.addColorStop(0, '#ffffff');
+  g.addColorStop(0.7, '#f0eee4');
+  g.addColorStop(1, '#c2c1b4');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(c, c, r, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Subtle crosshairs
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(c - r, c);
+  ctx.lineTo(c + r, c);
+  ctx.moveTo(c, c - r);
+  ctx.lineTo(c, c + r);
+  ctx.stroke();
+
+  // Miscue ring (dashed red)
+  ctx.strokeStyle = 'rgba(211, 47, 47, 0.75)';
+  ctx.lineWidth = 1.2;
+  ctx.setLineDash([3, 2]);
+  ctx.beginPath();
+  ctx.arc(c, c, r * MAXR * Math.min(1, miscueLimit), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  // Red tip impact dot
+  const t = tip || { x: 0, y: 0 };
+  const tx = c + (t.x || 0) * r * MAXR;
+  const ty = c - (t.y || 0) * r * MAXR;
+
+  // Glow halo
+  ctx.fillStyle = 'rgba(255, 59, 48, 0.38)';
+  ctx.beginPath();
+  ctx.arc(tx, ty, 5.5, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Red tip point
+  ctx.fillStyle = '#ff3333';
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.arc(tx, ty, 3.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+}
+
+function updateTvPower(power) {
+  const p = Math.max(0, Math.min(1, power || 0));
+  const num = document.getElementById('specPowerNum') || document.getElementById('tvPowerNum');
+  if (num) num.textContent = `${Math.round(p * 100)}%`;
+
+  const tiles = document.querySelectorAll('#specPowerTiles .pw-tile, #tvPowerTiles .pw-tile');
+  const total = tiles.length;
+  if (!total) return;
+  const activeCount = Math.round(p * total);
+  for (let i = 0; i < total; i++) {
+    tiles[i].classList.toggle('is-active', i < activeCount);
+  }
+}
+
+function syncTvShotSpecs() {
+  const curPower = (state.bot && state.bot.featherPower !== null && state.bot.featherPower !== undefined)
+    ? state.bot.featherPower
+    : state.power;
+  updateTvPower(curPower);
+  drawSpecTip(state.tip, eq?.cue?.miscueLimit ?? 0.8);
+  const tipLabel = document.getElementById('specTipLabel') || document.getElementById('tvTipLabel');
+  if (tipLabel) tipLabel.textContent = formatTipVietnamese(state.tip);
+}
+
+function updateTvBallsBar(game, balls, targetOrIds, isScratch) {
+  const container = document.getElementById('tvBallsList');
+  if (!container) return;
+  const isEight = game === '8ball';
+  const rackCount = isEight ? 15 : 9;
+  const aliveSet = new Set(balls.map((b) => b.id));
+
+  let aliveCount = 0;
+  for (let id = 1; id <= rackCount; id++) {
+    if (aliveSet.has(id)) aliveCount++;
+  }
+
+  const countEl = document.getElementById('tvBallsCount');
+  if (countEl) countEl.textContent = `${aliveCount}/${rackCount}`;
+
+  const targetSet = new Set(Array.isArray(targetOrIds) ? targetOrIds : (targetOrIds ? [targetOrIds] : []));
+
+  container.replaceChildren();
+  for (let id = 1; id <= rackCount; id++) {
+    const isAlive = aliveSet.has(id);
+    const isTarget = isAlive && targetSet.has(id);
+    const col = BALL_COLORS[id] || '#888';
+
+    const b = document.createElement('span');
+    b.className = `tv-ball${isAlive ? ' is-alive' : ' is-potted'}${isTarget ? ' is-target' : ''}${id >= 10 ? ' is-two' : ''}`;
+    if (isEight && id === 8) b.classList.add('is-eight-sep');
+
+    b.style.background = id >= 9
+      ? `linear-gradient(180deg, #f7f6ef 0 24%, ${col} 24% 76%, #f7f6ef 76%)`
+      : col;
+    b.title = isAlive
+      ? (isTarget ? `Bi #${id} (Mục tiêu tiếp theo)` : `Bi #${id} (Trên bàn)`)
+      : `Bi #${id} (Đã vào lỗ)`;
+
+    const num = document.createElement('span');
+    num.className = 'tv-ball-num';
+    num.textContent = String(id);
+    b.appendChild(num);
+
+    container.appendChild(b);
+  }
+
+  const scratchEl = document.getElementById('tvScratchBadge');
+  if (scratchEl) scratchEl.hidden = !isScratch;
+
+  const barEl = document.getElementById('tvBallsBar');
+  if (barEl && state.bot && state.bot.statusText) {
+    barEl.title = state.bot.statusText;
+  }
+}
+
+function initDraggableHud() {
+  const el = document.getElementById('shotSpecHud');
+  if (!el) return;
+  const storageKey = 'bida9-shot-hud-pos';
+  const saved = lsRead(storageKey);
+  if (saved) {
+    try {
+      const pos = JSON.parse(saved);
+      if (pos && typeof pos.left === 'number' && typeof pos.top === 'number') {
+        el.style.left = `${pos.left}px`;
+        el.style.top = `${pos.top}px`;
+      }
+    } catch {}
+  }
+
+  let isDragging = false;
+  let startX = 0, startY = 0, origLeft = 0, origTop = 0;
+
+  el.addEventListener('pointerdown', (e) => {
+    if (e.target && e.target.closest('button, a, input')) return;
+    isDragging = true;
+    el.classList.add('is-dragging');
+    el.setPointerCapture(e.pointerId);
+    startX = e.clientX;
+    startY = e.clientY;
+    const rect = el.getBoundingClientRect();
+    const parentRect = el.offsetParent ? el.offsetParent.getBoundingClientRect() : { left: 0, top: 0 };
+    origLeft = rect.left - parentRect.left;
+    origTop = rect.top - parentRect.top;
+    e.preventDefault();
+  });
+
+  el.addEventListener('pointermove', (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    const stage = el.offsetParent || document.body;
+    const maxLeft = Math.max(0, stage.clientWidth - el.offsetWidth - 8);
+    const maxTop = Math.max(0, stage.clientHeight - el.offsetHeight - 8);
+    const newLeft = Math.max(8, Math.min(maxLeft, origLeft + dx));
+    const newTop = Math.max(8, Math.min(maxTop, origTop + dy));
+    el.style.left = `${newLeft}px`;
+    el.style.top = `${newTop}px`;
+  });
+
+  const stopDrag = (e) => {
+    if (!isDragging) return;
+    isDragging = false;
+    el.classList.remove('is-dragging');
+    try { el.releasePointerCapture(e.pointerId); } catch {}
+    const curLeft = parseFloat(el.style.left);
+    const curTop = parseFloat(el.style.top);
+    if (!isNaN(curLeft) && !isNaN(curTop)) {
+      lsWrite(storageKey, JSON.stringify({ left: curLeft, top: curTop }));
+    }
+  };
+
+  el.addEventListener('pointerup', stopDrag);
+  el.addEventListener('pointercancel', stopDrag);
+}
+
 function syncBotUi() {
   const isEight = state.bot.game === '8ball';
   const isBvb = state.bot.matchType === 'bvb';
@@ -1187,6 +1489,13 @@ function syncBotUi() {
   } else {
     targetLabel = targetOrIds ? `Bi #${targetOrIds}` : 'Bi #9';
   }
+
+  if (isBvb) {
+    document.body.dataset.bvb = 'true';
+  } else {
+    delete document.body.dataset.bvb;
+  }
+
   panel.setBotHud({
     matchType: state.bot.matchType,
     bot1Name: state.bot.bot1Name,
@@ -1197,6 +1506,7 @@ function syncBotUi() {
     speed: state.bot.speed,
     scorePlayer: state.bot.scorePlayer,
     scoreBot: state.bot.scoreBot,
+    raceTo: state.bot.raceTo,
     turn: state.bot.turn,
     game: state.bot.game,
     difficulty: state.bot.difficulty,
@@ -1206,8 +1516,66 @@ function syncBotUi() {
     isFoul: state.bot.isFoul,
     thinking: state.bot.thinking,
   });
+
+  const tvBoard = document.getElementById('tvScoreboard');
+  if (tvBoard) {
+    const isBotMode = state.mode === 'bot' && !state.lobbyOpen;
+    tvBoard.hidden = !isBotMode;
+    if (isBotMode) {
+      const gLabel = state.bot.game === '8ball' ? '8 BI' : '9 BI';
+      const raceLabel = state.bot.raceTo > 0 ? `CHẠM ${state.bot.raceTo}` : 'TỰ DO';
+      const tvGameBadge = document.getElementById('tvGameBadge');
+      if (tvGameBadge) tvGameBadge.textContent = `${gLabel} · ${raceLabel}`;
+      const tvRackBadge = document.getElementById('tvRackBadge');
+      if (tvRackBadge) tvRackBadge.textContent = `VÁN ${state.bot.rack || 1}`;
+
+      const name1 = isBvb ? state.bot.bot1Name : 'BẠN';
+      const name2 = isBvb ? state.bot.bot2Name : 'BOT';
+      const diff1 = isBvb
+        ? (state.bot.bot1Diff === 'hero' ? 'HERO' : (BOT_DIFFICULTIES[state.bot.bot1Diff]?.shortLabel || 'TB').toUpperCase())
+        : 'CƠ THỦ';
+      const diff2 = isBvb
+        ? (state.bot.bot2Diff === 'hero' ? 'HERO' : (BOT_DIFFICULTIES[state.bot.bot2Diff]?.shortLabel || 'PRO').toUpperCase())
+        : (state.bot.difficulty === 'hero' ? 'HERO' : (BOT_DIFFICULTIES[state.bot.difficulty]?.shortLabel || 'TB').toUpperCase());
+
+      const tvName1 = document.getElementById('tvName1');
+      if (tvName1) tvName1.textContent = name1;
+      const tvDiff1 = document.getElementById('tvDiff1');
+      if (tvDiff1) tvDiff1.textContent = diff1;
+      const tvScore1 = document.getElementById('tvScore1');
+      if (tvScore1) tvScore1.textContent = String(state.bot.scorePlayer);
+
+      const tvName2 = document.getElementById('tvName2');
+      if (tvName2) tvName2.textContent = name2;
+      const tvDiff2 = document.getElementById('tvDiff2');
+      if (tvDiff2) tvDiff2.textContent = diff2;
+      const tvScore2 = document.getElementById('tvScore2');
+      if (tvScore2) tvScore2.textContent = String(state.bot.scoreBot);
+
+      const tvTargetBadge = document.getElementById('tvTargetBadge');
+      if (tvTargetBadge) tvTargetBadge.textContent = targetLabel;
+
+      updateTvBallsBar(state.bot.game, state.balls, targetOrIds, state.bot.isFoul);
+
+      const isShooter1 = who === 'player' || who === 'bot1';
+      const tvP1 = document.getElementById('tvPlayer1');
+      const tvP2 = document.getElementById('tvPlayer2');
+      if (tvP1 && tvP2) {
+        tvP1.classList.toggle('active-shooter', isShooter1);
+        tvP2.classList.toggle('active-shooter', !isShooter1);
+      }
+      syncTvShotSpecs();
+    }
+  }
+
+  const specHud = document.getElementById('shotSpecHud');
+  if (specHud) {
+    const isBotMode = state.mode === 'bot' && !state.lobbyOpen;
+    specHud.hidden = !isBotMode;
+  }
+
   if (state.mode === 'bot') {
-    panel.setTurnLocked(isBotTurn() || state.lobbyOpen);
+    panel.setTurnLocked(isBotTurn() || state.lobbyOpen || state.bot.matchOver);
   } else {
     panel.setTurnLocked(false);
   }
@@ -1252,18 +1620,26 @@ function scheduleBotTurn() {
   if (state.bot.paused) return;
 
   state.bot.thinking = true;
-  syncBotUi();
-  invalidate({ pred: false });
+  state.bot.feathering = false;
+  state.bot.featherPower = null;
 
-  const delayScale = state.bot.speed === 2 ? 0.35 : 1;
+  const speed = state.bot.speed || 1;
+  const delayScale = speed === 4 ? 0.18 : speed === 2 ? 0.42 : 1.0;
   const currentShooter = state.bot.turn;
   const shooterName = botNameOf(currentShooter);
   const shooterDiff = botDiffOf(currentShooter);
+  const isEight = state.bot.game === '8ball';
+  const botGroup = isEight ? state.bot.groups[currentShooter] : null;
 
+  // Giai đoạn 1: Quan sát & Nghĩ thế bi (1.6s at 1x)
+  state.bot.statusText = `🤖 ${shooterName} đang quan sát thế bi...`;
+  syncBotUi();
+  invalidate({ pred: false });
+
+  const obsDelay = Math.round(1600 * delayScale);
   addBotTimer(() => {
     if (state.mode !== 'bot' || state.phase !== 'aim' || state.bot.turn !== currentShooter) return;
-    const isEight = state.bot.game === '8ball';
-    const botGroup = isEight ? state.bot.groups[currentShooter] : null;
+
     const targetOrIds = isEight
       ? eightBallTargetIds(state.balls, botGroup)
       : lowestBallId(state.balls);
@@ -1274,12 +1650,17 @@ function scheduleBotTurn() {
       if (cue && pos) {
         cue.pos = { x: pos.x, y: pos.y };
         state.bot.ballInHand = false;
+        state.bot.statusText = `🤖 ${shooterName} đã đặt bi cái vào vị trí thuận lợi...`;
+        syncBotUi();
         invalidate({ pred: false });
       }
     }
 
+    // Giai đoạn 2: Vào thế cơ & ngắm hướng bi (1.5s at 1x)
+    const stanceDelay = Math.round(1500 * delayScale);
     addBotTimer(() => {
       if (state.mode !== 'bot' || state.phase !== 'aim' || state.bot.turn !== currentShooter) return;
+
       const shot = chooseBotShot(state.balls, geo, eq, shooterDiff, {
         onBreak: state.bot.onBreak,
         game: state.bot.game,
@@ -1291,37 +1672,94 @@ function scheduleBotTurn() {
       state.tip = { ...shot.tip };
       state.targetId = shot.targetId;
       state.pocket = shot.pocketIdx >= 0 ? shot.pocketIdx : null;
+      state.botElevation = shot.elevationDeg ?? DEFAULT_ELEVATION_DEG;
+      state.botLastShotKind = shot.kind;
+
+      const isHeroCurrent = isHeroWho(currentShooter);
+      let statusExtra = '';
+      if (isHeroCurrent) {
+        const hero = loadHeroProfile();
+        statusExtra = ` (Lvl ${hero.level || 13} · ${(hero.aimJitterDeg || 0.06).toFixed(2)}°)`;
+      }
+
       state.bot.statusText = state.bot.onBreak
-        ? `🤖 ${shooterName} đang ngắm phá bi...`
-        : shot.kind === 'safe'
-          ? `🤖 ${shooterName} tìm góc chạm bi #${shot.targetId}...`
-          : `🤖 ${shooterName} đang ngắm bi #${shot.targetId}...`;
+        ? `🤖 ${shooterName}${statusExtra} vào thế phá bi...`
+        : shot.kind === 'jump'
+          ? `🦘 ${shooterName}${statusExtra} vào thế NHẢY BI qua vật cản!`
+          : shot.kind === 'masse'
+            ? `🌀 ${shooterName}${statusExtra} vào thế MASSÉ xoáy cong qua vật cản!`
+            : shot.kind === 'safe'
+              ? `🛡️ ${shooterName}${statusExtra} ngắm giấu bi an toàn...`
+              : `🎯 ${shooterName}${statusExtra} ngắm bi #${shot.targetId} vào lỗ...`;
+
       panel.spinPad.set(state.tip, true);
+      syncTvShotSpecs();
       syncControls();
       invalidate({ pred: false });
 
+      // Giai đoạn 3: Nhịp tĩnh & nhấp cơ lấy cảm giác (1.5s at 1x)
+      const featherDelay = Math.round(1500 * delayScale);
       addBotTimer(() => {
         if (state.mode !== 'bot' || state.phase !== 'aim' || state.bot.turn !== currentShooter) return;
-        state.bot.thinking = false;
+
+        state.bot.statusText = `🎱 ${shooterName} đang nhấp cơ lấy nhịp tĩnh...`;
         syncBotUi();
-        startShot(true);
-      }, Math.round(650 * delayScale));
-    }, Math.round(550 * delayScale));
-  }, Math.round(500 * delayScale));
+
+        const featherDur = Math.round(1400 * delayScale);
+        if (featherDur > 200) {
+          state.bot.feathering = true;
+          const featherT0 = performance.now();
+          function animFeather(now) {
+            if (!state.bot.feathering || state.phase !== 'aim' || state.bot.turn !== currentShooter) return;
+            const elapsed = now - featherT0;
+            if (elapsed < featherDur) {
+              const wave = Math.sin((elapsed / featherDur) * Math.PI * 4);
+              state.bot.featherPower = Math.max(0.04, state.power * (0.65 + 0.35 * wave));
+              updateTvPower(state.bot.featherPower);
+              invalidate({ pred: false });
+              requestAnimationFrame(animFeather);
+            } else {
+              state.bot.feathering = false;
+              state.bot.featherPower = null;
+              updateTvPower(state.power);
+              invalidate({ pred: false });
+            }
+          }
+          requestAnimationFrame(animFeather);
+        }
+
+        // Giai đoạn 4: Ra ngọn mượt mà (Strike)
+        const strikeDelay = Math.round(featherDur + 350 * delayScale);
+        addBotTimer(() => {
+          if (state.mode !== 'bot' || state.phase !== 'aim' || state.bot.turn !== currentShooter) return;
+          state.bot.feathering = false;
+          state.bot.featherPower = null;
+          state.bot.thinking = false;
+          state.bot.statusText = `💥 ${shooterName} ra ngọn!`;
+          syncBotUi();
+          startShot(true);
+        }, strikeDelay);
+      }, featherDelay);
+    }, stanceDelay);
+  });
 }
 
-function enterBotMode(difficulty, game) {
+function enterBotMode(difficulty, game, raceTo) {
   if (!isAimReady()) return;
   clearBotTimers();
+  delete document.body.dataset.bvb;
   state.bot.matchType = 'pve';
   if (difficulty && BOT_DIFFICULTIES[difficulty]) state.bot.difficulty = difficulty;
   if (game && BOT_GAMES[game]) state.bot.game = game;
+  if (raceTo !== undefined) state.bot.raceTo = raceTo;
+  state.bot.matchOver = false;
+  panel.setMatchWin(false);
   if (state.mode === 'free') state.freeBackup = snapshot();
-  state.appMode = 'bot';
+  state.appMode = state.bot.difficulty === 'hero' ? 'hero' : 'bot';
   state.mode = 'bot';
   state.lobbyOpen = false;
   panel.setLobbyOpen(false);
-  panel.setAppMode('bot');
+  panel.setAppMode(state.appMode);
   panel.setActiveTab('bot');
   state.bot.scorePlayer = 0;
   state.bot.scoreBot = 0;
@@ -1333,12 +1771,16 @@ function enterBotMode(difficulty, game) {
 function enterBvbMode(opts = {}) {
   if (!isAimReady()) return;
   clearBotTimers();
+  document.body.dataset.bvb = 'true';
   state.bot.matchType = 'bvb';
   if (opts.name1) state.bot.bot1Name = opts.name1.trim() || 'Alpha';
   if (opts.name2) state.bot.bot2Name = opts.name2.trim() || 'Beta';
   if (opts.diff1 && BOT_DIFFICULTIES[opts.diff1]) state.bot.bot1Diff = opts.diff1;
   if (opts.diff2 && BOT_DIFFICULTIES[opts.diff2]) state.bot.bot2Diff = opts.diff2;
   if (opts.game && BOT_GAMES[opts.game]) state.bot.game = opts.game;
+  if (opts.raceTo !== undefined) state.bot.raceTo = opts.raceTo;
+  state.bot.matchOver = false;
+  panel.setMatchWin(false);
   state.bot.paused = false;
   if (state.mode === 'free') state.freeBackup = snapshot();
   state.appMode = 'bvb';
@@ -1357,6 +1799,7 @@ function enterBvbMode(opts = {}) {
 function enterPracticeMode(subMode = state.practiceMode, opts = {}) {
   if (!isAimReady()) return;
   clearBotTimers();
+  delete document.body.dataset.bvb;
   state.appMode = 'practice';
   state.lobbyOpen = false;
   panel.setLobbyOpen(false);
@@ -1512,6 +1955,7 @@ function syncControls() {
     panel.setTurnLocked(false);
     updateButtons();
   }
+  syncTvShotSpecs();
 }
 
 function updateAimUi() {
@@ -1579,6 +2023,7 @@ let keys = null; // keyboard controller (created below, after the panel exists)
 const panel = createPanel({
   onPower: (p) => {
     state.power = p;
+    syncTvShotSpecs();
     invalidate();
   },
   onAim: (d) => {
@@ -1609,6 +2054,7 @@ const panel = createPanel({
   onTip: (tip) => {
     if (!isPlayerReady() || state.mode === 'squirt' || state.mode === 'thickness') return;
     state.tip = tip;
+    syncTvShotSpecs();
     invalidate();
   },
   onShoot: () => startShot(false),
@@ -1663,12 +2109,26 @@ const panel = createPanel({
   onMode: setMode,
   onAppMode: (app) => {
     if (app === 'bvb') enterBvbMode();
+    else if (app === 'hero') enterBotMode('hero');
     else if (app === 'bot') enterBotMode();
     else enterPracticeMode(state.practiceMode);
   },
-  onStartBot: (diff, game) => enterBotMode(diff, game),
+  onStartBot: (diff, game, raceTo) => enterBotMode(diff, game, raceTo),
   onStartBvb: (opts) => enterBvbMode(opts),
   onStartPractice: () => enterPracticeMode('free'),
+  onBotRace: (raceTo) => {
+    state.bot.raceTo = raceTo;
+    syncBotUi();
+    panel.toast(raceTo > 0 ? `Mục tiêu trận đấu: Chạm ${raceTo} ván thắng` : 'Chế độ Tự do (không giới hạn số ván)', 'ok');
+  },
+  onKeepPlaying: () => {
+    state.bot.matchOver = false;
+    state.bot.raceTo = 0;
+    panel.setMatchWin(false);
+    syncBotUi();
+    panel.toast('Tiếp tục trận đấu ở chế độ Tự do', 'ok');
+    startBotRack(state.bot.turn);
+  },
   onBvbPause: () => {
     state.bot.paused = !state.bot.paused;
     if (state.bot.paused) {
@@ -1681,9 +2141,22 @@ const panel = createPanel({
     syncBotUi();
   },
   onBvbSpeed: () => {
-    state.bot.speed = state.bot.speed === 1 ? 2 : 1;
-    panel.toast(state.bot.speed === 2 ? 'Tốc độ: 2x (Nhanh)' : 'Tốc độ: 1x (Bình thường)', 'ok');
+    state.bot.speed = state.bot.speed === 1 ? 2 : state.bot.speed === 2 ? 4 : 1;
+    const speedLabel = state.bot.speed === 4 ? '4x (Siêu tốc)' : state.bot.speed === 2 ? '2x (Nhanh)' : '1x (Thực tế)';
+    panel.toast(`Tốc độ Bot: ${speedLabel}`, 'ok');
     syncBotUi();
+  },
+  onCycleCam: () => {
+    if (view !== '3d') {
+      setView('3d');
+    } else {
+      const next = nextCameraMode(camMode);
+      setCamMode(next);
+      panel.toast(`🎥 Góc quay: ${CAMERA_MODE_LABEL[next] || next}`, 'ok');
+    }
+  },
+  onToggleAimAid: () => {
+    toggleAimAid();
   },
   onBvbRename: ({ name1, name2 }) => {
     state.bot.bot1Name = name1 || 'Alpha';
@@ -1727,13 +2200,17 @@ const panel = createPanel({
         diff1: state.bot.bot1Diff,
         diff2: state.bot.bot2Diff,
         game: state.bot.game,
+        raceTo: state.bot.raceTo,
       });
       const gLabel = BOT_GAMES[state.bot.game]?.label || '9 Bi';
-      panel.toast(`Bắt đầu trận ${gLabel} mới: ${state.bot.bot1Name} vs ${state.bot.bot2Name}`, 'ok');
+      const raceLabel = state.bot.raceTo > 0 ? ` (Chạm ${state.bot.raceTo})` : '';
+      panel.toast(`Bắt đầu trận ${gLabel} mới: ${state.bot.bot1Name} vs ${state.bot.bot2Name}${raceLabel}`, 'ok');
     } else {
-      enterBotMode(state.bot.difficulty, state.bot.game);
+      enterBotMode(state.bot.difficulty, state.bot.game, state.bot.raceTo);
       const gLabel = BOT_GAMES[state.bot.game]?.label || '9 Bi';
-      panel.toast(`Bắt đầu trận ${gLabel} mới với Bot`, 'ok');
+      const oppLabel = state.bot.difficulty === 'hero' ? 'Hero' : 'Bot';
+      const raceLabel = state.bot.raceTo > 0 ? ` (Chạm ${state.bot.raceTo})` : '';
+      panel.toast(`Bắt đầu trận ${gLabel} mới với ${oppLabel}${raceLabel}`, 'ok');
     }
   },
   onThickPick: answerThickness,
@@ -1952,10 +2429,12 @@ keys = createKeyboard({
       setCamMode(m);
       return `Camera: ${CAMERA_MODE_LABEL[m]}`;
     },
+    toggleAimAid: () => toggleAimAid(),
+    toggleSide: () => toggleSidePanel(),
     camHeight: (d) => (v3 ? v3.camHeight(d) : null),
     camDist: (d) => (v3 ? v3.camDist(d) : null),
     hud: () => ({
-      visible: state.mode !== 'thickness',
+      visible: state.mode !== 'thickness' && state.mode !== 'bot',
       power: state.power,
       aimDeg: info && info.aimDir ? normAngle(deg(Math.atan2(info.aimDir.y, info.aimDir.x))) : null,
       aimMode: state.aimMode,
@@ -2089,11 +2568,79 @@ const qualBtns = [...document.querySelectorAll('[data-q3d]')];
 const opts3d = document.getElementById('v3opts');
 const load3d = document.getElementById('v3load');
 
+function syncAimAidUi() {
+  const on = state.aimAid !== false;
+  const btnView = document.getElementById('btnViewAimAid');
+  if (btnView) {
+    btnView.setAttribute('aria-pressed', String(on));
+    btnView.textContent = on ? '🎯 Tia ngắm' : '👁️ Thực tế';
+    btnView.title = on
+      ? 'Đang bật tia ngắm hỗ trợ (phím L để tắt sang Góc nhìn thực tế)'
+      : 'Đang ở góc nhìn thực tế - không tia ngắm (phím L để bật lại tia ngắm)';
+    btnView.classList.toggle('realistic-mode', !on);
+  }
+  const btnBvbAim = document.getElementById('btnBvbAimAid');
+  if (btnBvbAim) {
+    btnBvbAim.setAttribute('aria-pressed', String(on));
+    btnBvbAim.textContent = on ? '🎯 Tia ngắm: Bật' : '👁️ Thực tế: Tắt';
+    btnBvbAim.title = on
+      ? 'Đang bật tia ngắm hỗ trợ. Bấm để tắt và xem góc nhìn thực tế'
+      : 'Đang tắt tia ngắm (chế độ thực tế). Bấm để bật lại';
+    btnBvbAim.classList.toggle('realistic-mode', !on);
+  }
+  const lobbyBvbAim = document.getElementById('lobbyBvbAimAid');
+  if (lobbyBvbAim) lobbyBvbAim.checked = on;
+  const lobbyBotAim = document.getElementById('lobbyBotAimAid');
+  if (lobbyBotAim) lobbyBotAim.checked = on;
+}
+
+function toggleAimAid() {
+  state.aimAid = state.aimAid === false ? true : false;
+  lsWrite('bida9-aim-aid', state.aimAid ? '1' : '0');
+  predDirty = true;
+  infoDirty = true;
+  syncAimAidUi();
+  panel.toast(state.aimAid ? '🎯 Đã bật tia ngắm hỗ trợ' : '👁️ Chế độ thực tế (Đã tắt tia ngắm)', 'ok');
+  invalidate();
+  return state.aimAid;
+}
+
+function toggleSidePanel() {
+  document.body.classList.toggle('side-collapsed');
+  const collapsed = document.body.classList.contains('side-collapsed');
+  const btn = document.getElementById('btnToggleSide');
+  if (btn) {
+    btn.textContent = collapsed ? '⚙️ Hiện bảng' : '📺 Bàn xem';
+    btn.setAttribute('aria-pressed', String(collapsed));
+    btn.title = collapsed
+      ? 'Đang ẩn thanh bên (toàn màn hình bàn bida). Bấm hoặc nhấn phím B để hiện lại'
+      : 'Bấm hoặc nhấn phím B để ẩn thanh bên và mở rộng bàn bida xem như TV';
+  }
+  resizeViews();
+  panel.resize();
+  invalidate({ pred: false });
+  panel.toast(collapsed ? '📺 Chế độ toàn màn hình (Đã ẩn bảng điều khiển - Phím B để mở lại)' : '📊 Đã hiện lại bảng điều khiển', 'ok');
+  return collapsed;
+}
+
 function syncViewUi() {
   for (const b of viewBtns) b.setAttribute('aria-pressed', String(b.dataset.view === view));
   for (const b of camBtns) b.setAttribute('aria-pressed', String(b.dataset.cam === camMode));
   const q = v3 ? v3.getQuality() : quality3d || 'high';
   for (const b of qualBtns) b.setAttribute('aria-pressed', String(b.dataset.q3d === q));
+  const btnBvbCam = document.getElementById('btnBvbCam');
+  if (btnBvbCam) {
+    const lbl = CAMERA_MODE_LABEL[camMode] || 'Tự động';
+    btnBvbCam.textContent = `🎥 Camera: ${lbl}`;
+    btnBvbCam.title = `Góc quay 3D hiện tại: ${lbl}. Bấm để chuyển (Tự động / Quay TV / Theo bi / Cố định)`;
+  }
+  const btnToggleSide = document.getElementById('btnToggleSide');
+  if (btnToggleSide) {
+    const collapsed = document.body.classList.contains('side-collapsed');
+    btnToggleSide.textContent = collapsed ? '⚙️ Hiện bảng' : '📺 Bàn xem';
+    btnToggleSide.setAttribute('aria-pressed', String(collapsed));
+  }
+  syncAimAidUi();
 }
 
 function setCamMode(m) {
@@ -2190,6 +2737,8 @@ async function setView(next) {
 for (const b of viewBtns) b.addEventListener('click', () => setView(b.dataset.view));
 for (const b of camBtns) b.addEventListener('click', () => setCamMode(b.dataset.cam));
 for (const b of qualBtns) b.addEventListener('click', () => setQuality3d(b.dataset.q3d));
+document.getElementById('btnViewAimAid')?.addEventListener('click', toggleAimAid);
+document.getElementById('btnToggleSide')?.addEventListener('click', toggleSidePanel);
 miniCanvas.addEventListener('click', () => setView('2d'));
 syncViewUi();
 
@@ -2211,5 +2760,6 @@ if (!loadFromHash()) {
 syncControls();
 panel.updateStats(stats);
 renderer.resize();
+initDraggableHud();
 invalidate();
 if (lsRead('bida9-view') === '3d') setView('3d');

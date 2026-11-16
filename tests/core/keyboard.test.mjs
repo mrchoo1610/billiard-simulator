@@ -44,7 +44,7 @@ test('keyAction: WASD / letters / digits / specials', () => {
   assert.deepEqual(keyAction(ev('P', { shiftKey: true })), { type: 'pocket', auto: true });
   assert.deepEqual(keyAction(ev('7')), { type: 'targetBall', id: 7 });
   assert.equal(keyAction(ev('0')), null);
-  for (const [k, t] of [['m', 'aimMode'], ['r', 'reset'], ['n', 'random'], ['f', 'predict'], ['h', 'help'], ['?', 'help'], ['Escape', 'close']]) {
+  for (const [k, t] of [['m', 'aimMode'], ['r', 'reset'], ['n', 'random'], ['f', 'predict'], ['l', 'toggleAimAid'], ['b', 'toggleSide'], ['h', 'help'], ['?', 'help'], ['Escape', 'close']]) {
     assert.equal(keyAction(ev(k)).type, t, k);
   }
   assert.equal(keyAction(ev('x')), null);

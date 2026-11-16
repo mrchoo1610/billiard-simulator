@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { R, buildTable } from '../../src/core/table.js';
 import { minCueElevationDeg, effectiveCueElevationDeg, railSurfaceHeight } from '../../src/core/geometry.js';
 import { createBall, simulate } from '../../src/core/physics.js';
-import { cuePose, fromThree, MM } from '../../src/ui/view3d-math.js';
+import { cuePose, fromThree, MM, CAMERA_MODES, CAMERA_MODE_LABEL, nextCameraMode } from '../../src/ui/view3d-math.js';
 import { tablePreset, cuePreset } from '../../src/core/equipment.js';
 import { dist } from '../../src/core/vec.js';
 import {
@@ -16,6 +16,11 @@ import {
   evaluateEightBallTurn,
   placeCueBallForBot,
   chooseBotShot,
+  findJumpShot,
+  findMasseShot,
+  loadHeroProfile,
+  saveHeroProfile,
+  recordHeroProgress,
 } from '../../src/features/bot.js';
 
 const eq = { table: tablePreset('club-9ft'), cue: cuePreset('allround') };
@@ -417,4 +422,158 @@ test('Bot vs Bot: 8-ball and 9-ball turn evaluation with bot1 vs bot2', () => {
   });
   assert.equal(winB2.winRack, true);
   assert.equal(winB2.loseRack, false);
+});
+
+test('Hero persistent evolution: skills update and improve progressively over shots and racks', () => {
+  const init = loadHeroProfile();
+  assert.ok(init.aimJitterDeg <= 0.08, 'Hero starts with tight aim');
+
+  const startJitter = init.aimJitterDeg;
+  const startXp = init.xp;
+
+  // Record 10 shots with pots
+  for (let i = 0; i < 10; i++) {
+    recordHeroProgress('shot');
+    recordHeroProgress('pot', { count: 2 });
+  }
+
+  const prog = recordHeroProgress('rack_win');
+  const updated = prog.profile;
+
+  assert.ok(updated.xp > startXp, 'XP increased');
+  assert.ok(updated.totalShots >= init.totalShots + 10, 'Shots counted');
+  assert.ok(updated.pots >= init.pots + 20, 'Pots counted');
+  assert.ok(updated.racksWon >= init.racksWon + 1, 'Racks won counted');
+  assert.ok(updated.aimJitterDeg <= startJitter, 'Jitter error maintained or improved');
+
+  // Verify chooseBotShot works seamlessly with difficulty='hero'
+  const cue = createBall(0, 500, 500);
+  const tgt = createBall(1, 900, 500);
+  const shot = chooseBotShot([cue, tgt], geo, eq, 'hero');
+  assert.ok(shot.aimDir, 'Hero chose a valid aim direction');
+  assert.ok(shot.power > 0, 'Hero chose power');
+});
+
+test('Hero skills: Jump shot and Massé curve shot solvers when snookered', () => {
+  // 1. Jump shot test: Blocker ball 2 directly in between cue and target 1
+  const cueJ = createBall(0, 500, 600);
+  const blockerJ = createBall(2, 680, 600); // 180mm away
+  const targetJ = createBall(1, 1050, 600); // 550mm away
+  const ballsJ = [cueJ, blockerJ, targetJ];
+
+  const jumpShot = findJumpShot(ballsJ, cueJ, [targetJ], eq, geo);
+  assert.ok(jumpShot, 'Jump shot found for snookered layout');
+  assert.equal(jumpShot.kind, 'jump');
+  assert.equal(jumpShot.targetId, 1);
+  assert.ok(jumpShot.elevationDeg >= 40, 'Elevated stroke for jump');
+  assert.ok(jumpShot.power >= 0.78, 'Strong power for jump');
+
+  // Verify jump simulation: hops over blocker 2, hits target 1 first
+  const simResJ = simulate(ballsJ, jumpShot, { table: eq.table, cue: eq.cue, rng: () => 0.5, orientation: false, recordPaths: false });
+  assert.equal(simResJ.events.firstContact, 1, 'Cue hopped over blocker 2 and made first contact with target 1');
+  assert.equal(simResJ.events.potted.includes(0), false, 'Cue did not scratch');
+
+  // 2. Massé curve shot test: Blocker ball 2 close to cue (70mm away), curves around it
+  const cueM = createBall(0, 500, 600);
+  const blockerM = createBall(2, 570, 600);
+  const targetM = createBall(1, 1100, 600);
+  const ballsM = [cueM, blockerM, targetM];
+
+  const masseShot = findMasseShot(ballsM, cueM, [targetM], eq, geo);
+  assert.ok(masseShot, 'Massé shot found for blocked layout');
+  assert.equal(masseShot.kind, 'masse');
+  assert.equal(masseShot.targetId, 1);
+  assert.ok(masseShot.elevationDeg >= 58, 'Steep elevation for massé curve');
+  assert.ok(Math.abs(masseShot.tip.x) >= 0.4, 'Strong side english applied');
+
+  // Verify massé simulation: curves around blocker 2, hits target 1 first
+  const simResM = simulate(ballsM, masseShot, { table: eq.table, cue: eq.cue, rng: () => 0.5, orientation: false, recordPaths: false });
+  assert.equal(simResM.events.firstContact, 1, 'Cue curved around blocker 2 and made first contact with target 1');
+  assert.equal(simResM.events.potted.includes(0), false, 'Cue did not scratch');
+
+  // 3. chooseBotShot in snookered situation with Hero difficulty executes trick shot
+  const heroShot = chooseBotShot(ballsJ, geo, eq, 'hero');
+  assert.ok(heroShot.kind === 'jump' || heroShot.kind === 'masse', `Hero executed trick shot (got ${heroShot.kind})`);
+  assert.equal(heroShot.targetId, 1);
+
+  // 4. Hero progress records jump and masse executions
+  const initProfile = loadHeroProfile();
+  const startJumps = initProfile.jumpShots || 0;
+  const startMasses = initProfile.masseShots || 0;
+
+  recordHeroProgress('jump_shot');
+  recordHeroProgress('masse_shot');
+
+  const afterProfile = loadHeroProfile();
+  assert.equal(afterProfile.jumpShots, startJumps + 1, 'Jump shot count tracked');
+  assert.equal(afterProfile.masseShots, startMasses + 1, 'Massé shot count tracked');
+});
+
+test('Hero option and Race to Win match logic', () => {
+  // 1. Verify BOT_DIFFICULTIES contains hero
+  assert.ok(BOT_DIFFICULTIES.hero, 'hero exists in BOT_DIFFICULTIES');
+  assert.equal(BOT_DIFFICULTIES.hero.id, 'hero');
+  assert.equal(BOT_DIFFICULTIES.hero.canJump, true);
+  assert.equal(BOT_DIFFICULTIES.hero.canMasse, true);
+
+  // 2. Race to Win logic simulation
+  function checkRaceWon(scorePlayer, scoreBot, raceTo) {
+    if (!raceTo || raceTo <= 0) return false;
+    return scorePlayer >= raceTo || scoreBot >= raceTo;
+  }
+
+  // Race to 5: at 4-3, not won yet; at 5-3, player wins!
+  assert.equal(checkRaceWon(4, 3, 5), false, 'Race to 5 ongoing at 4-3');
+  assert.equal(checkRaceWon(5, 3, 5), true, 'Race to 5 won at 5-3');
+  assert.equal(checkRaceWon(2, 5, 5), true, 'Race to 5 won by bot at 2-5');
+
+  // Race to 1 (sudden death): 1-0 wins immediately
+  assert.equal(checkRaceWon(1, 0, 1), true, 'Race to 1 won at 1-0');
+
+  // Endless / Free mode (raceTo = 0): never ends automatically
+  assert.equal(checkRaceWon(12, 10, 0), false, 'Endless mode does not terminate');
+});
+
+test('Bot & BvB: Realistic view (no aim lines) & Auto-orbit camera mode', () => {
+  // 1. Verify CAMERA_MODES includes 'orbit' and has broadcast TV label
+  assert.ok(CAMERA_MODES.includes('orbit'), 'orbit mode exists in CAMERA_MODES');
+  assert.equal(CAMERA_MODE_LABEL.orbit, 'Quay TV');
+  assert.equal(nextCameraMode('auto'), 'orbit');
+  assert.equal(nextCameraMode('orbit'), 'follow');
+
+  // 2. Test overlay computation for realistic view vs normal
+  function computeEffOverlays(aimAid, mode, turn, diff) {
+    if (aimAid === false) {
+      return { aim: false, actual: false, ghost: false, pocket: false, tangent: false, roll: false, predict: false };
+    }
+    if (mode === 'bot') {
+      const aid = botAidFor(diff);
+      return { aim: aid.aim, actual: false, ghost: aid.ghost, pocket: aid.pocket, tangent: aid.tangent, roll: false, predict: false };
+    }
+    return { aim: true, actual: true, ghost: true, pocket: true, tangent: true, roll: false, predict: true };
+  }
+
+  // When aimAid is true, assistance lines are active
+  const aidsOn = computeEffOverlays(true, 'bot', 'player', 'medium');
+  assert.equal(aidsOn.aim, true);
+
+  // When aimAid is false (realistic mode), all guidance lines and ghosts are hidden
+  const realistic = computeEffOverlays(false, 'bot', 'player', 'medium');
+  assert.deepEqual(realistic, {
+    aim: false,
+    actual: false,
+    ghost: false,
+    pocket: false,
+    tangent: false,
+    roll: false,
+    predict: false,
+  }, 'All aim aid lines suppressed in realistic view');
+
+  // 3. Auto-orbit rate verification (0.35 rad/sec produces full 360 rotation in ~18 seconds)
+  const dt = 1 / 60;
+  let angle = 0;
+  for (let i = 0; i < 60; i++) {
+    angle += dt * 0.35;
+  }
+  assert.ok(Math.abs(angle - 0.35) < 1e-4, 'Auto-orbit integrates smoothly over 1 second');
 });

@@ -228,8 +228,13 @@ export function createCameraDirector(cfg = {}) {
   return { update, reset, get state() { return state; } };
 }
 
-export const CAMERA_MODES = ['auto', 'fixed', 'follow'];
-export const CAMERA_MODE_LABEL = { auto: 'Tự động', fixed: 'Cố định', follow: 'Theo bi cái' };
+export const CAMERA_MODES = ['auto', 'orbit', 'follow', 'fixed'];
+export const CAMERA_MODE_LABEL = {
+  auto: 'Tự động',
+  orbit: 'Quay TV',
+  follow: 'Theo bi cái',
+  fixed: 'Cố định',
+};
 export const nextCameraMode = (m) => CAMERA_MODES[(CAMERA_MODES.indexOf(m) + 1) % CAMERA_MODES.length];
 
 /* ------------------------------------------------------------------ cue stick */

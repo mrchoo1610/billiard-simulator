@@ -413,7 +413,7 @@ export async function createView3D(host) {
       m.material.transparent = false;
       m.material.opacity = 1;
       m.castShadow = true;
-      m.position.set(b.pos.x, R, b.pos.y);
+      m.position.set(b.pos.x, R + (b.z || 0), b.pos.y);
       const q = physQuatToThree(b.q || IDENT_Q);
       m.quaternion.set(q.x, q.y, q.z, q.w);
       seen.add(b.id);
@@ -681,6 +681,8 @@ export async function createView3D(host) {
   const saveCam = () => lsSet('bida9-v3-view', JSON.stringify(cam));
   const director = createCameraDirector();
   let P = null; // shown focus: { x, y, h }
+  let orbitYaw = 0; // manual orbit offset during bot turns / spectating (radians)
+  let autoOrbitAngle = 0; // continuous rotation for 'orbit' broadcast camera mode
   let trans = null;
   let wasShooting = false;
   let lastHeading = 0;
@@ -726,13 +728,37 @@ export async function createView3D(host) {
           P = { x: trans.from.x + (goal.x - trans.from.x) * e, y: trans.from.y + (goal.y - trans.from.y) * e, h: lerpAngle(trans.from.h, goal.h, e) };
         }
       }
-      if (!trans) P = { ...goal };
+      if (!trans) {
+        if (sc.isBot && Math.abs(lerpAngle(P.h, goal.h, 1) - P.h) > 0.005) {
+          P.x = goal.x;
+          P.y = goal.y;
+          P.h = lerpAngle(P.h, goal.h, smoothAlpha(dt, 7));
+          animatingNow = true;
+        } else {
+          P = { ...goal };
+        }
+      }
     } else if (camMode === 'follow' && cue) {
       const a = smoothAlpha(dt, 3);
       P.x += (cue.pos.x - P.x) * a;
       P.y += (cue.pos.y - P.y) * a;
       const sp = cue.vel ? Math.hypot(cue.vel.x, cue.vel.y) : 0;
       if (sp > 200) P.h = lerpAngle(P.h, Math.atan2(cue.vel.y, cue.vel.x), smoothAlpha(dt, 2.5));
+    }
+    if (camMode === 'orbit') {
+      autoOrbitAngle += dt * 0.35;
+      animatingNow = true;
+      if (shooting && cue) {
+        const a = smoothAlpha(dt, 3);
+        P.x += (cue.pos.x - P.x) * a;
+        P.y += (cue.pos.y - P.y) * a;
+      }
+    }
+    if (host.canRotate() && Math.abs(orbitYaw) > 1e-3) {
+      orbitYaw = lerpAngle(orbitYaw, 0, smoothAlpha(dt, 8));
+      animatingNow = true;
+    } else if (host.canRotate()) {
+      orbitYaw = 0;
     }
     // situational director (Tự động)
     let blend = 0;
@@ -752,7 +778,8 @@ export async function createView3D(host) {
 
     const aspect = camera.aspect;
     const fovEye = fovForAspect(aspect);
-    const eye = cameraPose({ cue: { x: P.x, y: P.y }, heading: P.h, distance: cam.dist, height: cam.height, dims: tableDims });
+    const camHeading = P.h + orbitYaw + (camMode === 'orbit' ? autoOrbitAngle : 0);
+    const eye = cameraPose({ cue: { x: P.x, y: P.y }, heading: camHeading, distance: cam.dist, height: cam.height, dims: tableDims });
     applyPose(eye.position, eye.target, { x: 0, y: 1, z: 0 }, qEye);
     if (blend > 0) {
       const top = topDownPose(tableDims.W, tableDims.H, fovEye, aspect);
@@ -771,7 +798,7 @@ export async function createView3D(host) {
       camera.fov = fovEye;
       camera.updateProjectionMatrix();
     }
-    animatingNow = !!trans || moving || dirActive || strokeActive || (shooting && camMode === 'follow');
+    animatingNow = !!trans || moving || dirActive || strokeActive || (shooting && camMode === 'follow') || (camMode === 'orbit') || animatingNow;
   }
 
   /* ---------------------------------------------------------------- sizing / quality */
@@ -866,8 +893,17 @@ export async function createView3D(host) {
           cam.height = clampCamHeight(cam.height - dy * 0.0015);
           saveCam();
           poke();
-        } else if (dx !== 0 && host.canRotate()) {
-          host.onRotate(dragToAimDeg(dx));
+        } else if (host.canRotate()) {
+          if (dx !== 0) {
+            orbitYaw = 0;
+            host.onRotate(dragToAimDeg(dx));
+            poke();
+          }
+        } else {
+          // Free camera view adjustment during Bot turns / BvB matches / rolling balls
+          if (dx !== 0) orbitYaw -= dragToAimDeg(dx) * (Math.PI / 180);
+          if (dy !== 0) cam.height = clampCamHeight(cam.height - dy * 0.0015);
+          saveCam();
           poke();
         }
       }
@@ -899,6 +935,10 @@ export async function createView3D(host) {
   canvas.addEventListener('pointerup', (e) => end(e, false));
   canvas.addEventListener('pointercancel', (e) => end(e, true));
   canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('dblclick', () => {
+    orbitYaw = 0;
+    poke();
+  });
   canvas.addEventListener(
     'wheel',
     (e) => {
@@ -943,6 +983,7 @@ export async function createView3D(host) {
     getQuality: () => quality,
     setCameraMode(m) {
       camMode = m;
+      if (m === 'orbit') autoOrbitAngle = 0;
       director.reset();
       trans = null;
       host.requestFrame();
@@ -952,6 +993,8 @@ export async function createView3D(host) {
     activate() {
       P = null;
       trans = null;
+      orbitYaw = 0;
+      autoOrbitAngle = 0;
       lastNow = 0;
       wasShooting = false;
       director.reset();
@@ -985,7 +1028,7 @@ export async function createView3D(host) {
     /** Camera position / heading in physics mm for the minimap marker. */
     cameraMarker() {
       if (!P) return null;
-      return { x: P.x, y: P.y, h: P.h, top: blendNow > 0.5 };
+      return { x: P.x, y: P.y, h: P.h + orbitYaw + (camMode === 'orbit' ? autoOrbitAngle : 0), top: blendNow > 0.5 };
     },
     label: (m) => CAMERA_MODE_LABEL[m],
     toThree: (p) => toThree(p, tableDims),
