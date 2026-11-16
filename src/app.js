@@ -128,6 +128,7 @@ let strokePending = false;
 let loadingHash = false;
 let dropAnims = [];
 let seenDropCount = 0;
+let seenOffTableCount = 0;
 let seenContactCount = 0;
 let seenCushionCount = 0;
 const isAimReady = () => state.phase === 'aim' && !strokePending;
@@ -154,6 +155,7 @@ function botDiffOf(who) {
 
 function isHeroWho(who) {
   if (state.mode !== 'bot') return false;
+  if (state.bot.matchType !== 'bvb') return who === 'bot' && state.bot.difficulty === 'hero'; // never the human player
   const diff = botDiffOf(who);
   if (diff === 'hero') return true;
   const name = (botNameOf(who) || '').toLowerCase();
@@ -376,7 +378,13 @@ function effOverlays() {
   return o;
 }
 
-const baseElevation = () => (state.mode === 'bot' && state.botElevation != null ? state.botElevation : (state.mode === 'free' ? state.elevation : DEFAULT_ELEVATION_DEG));
+/** Elevation drills (thickness / position / squirt) keep the default cue; otherwise the player raises the cue; the bot uses its own. */
+const elevationLocked = () => state.mode === 'thickness' || state.mode === 'position' || state.mode === 'squirt';
+const baseElevation = () => {
+  if (elevationLocked()) return DEFAULT_ELEVATION_DEG;
+  if (state.mode === 'bot' && state.botElevation != null) return state.botElevation;
+  return state.elevation;
+};
 function currentAimDir() {
   if (state.aimMode === 'manual') {
     return { x: Math.cos(rad(state.aimAngle)), y: Math.sin(rad(state.aimAngle)) };
@@ -623,6 +631,15 @@ function frame(now) {
         syncPottedUi();
       }
     }
+    // balls that flew off the table: no drop animation or pocket sound, but they are gone from the table
+    const evOff = state.sim.events.offTable;
+    while (seenOffTableCount < evOff.length) {
+      const id = evOff[seenOffTableCount++];
+      if (!state.pottedIds.includes(id)) {
+        state.pottedIds.push(id);
+        syncPottedUi();
+      }
+    }
     for (let i = dropAnims.length - 1; i >= 0; i--) {
       if (!stepDropAnim(dropAnims[i], dt * timeScale)) dropAnims.splice(i, 1);
     }
@@ -784,6 +801,7 @@ function doShot() {
   timeScale = 1;
   dropAnims = [];
   seenDropCount = 0;
+  seenOffTableCount = 0;
   seenContactCount = 0;
   seenCushionCount = 0;
   seenContactCount = 0;
@@ -828,6 +846,7 @@ function finishShot() {
   timeScale = 1;
   dropAnims = [];
   seenDropCount = 0;
+  seenOffTableCount = 0;
   seenContactCount = 0;
   seenCushionCount = 0;
   if (!ball(state.targetId) || objPotted.includes(state.targetId)) {
@@ -837,6 +856,7 @@ function finishShot() {
 
   const mode = state.mode;
   state.power = 0.3;
+  state.elevation = DEFAULT_ELEVATION_DEG;
   if (mode !== 'squirt') {
     state.tip = { x: 0, y: 0 };
     panel.spinPad.set(state.tip, true);
@@ -1042,6 +1062,7 @@ function finishShot() {
         }
         syncControls();
         panel.setTurnLocked(true);
+        state.bot.pendingRack = rackWinner; // survives a pause, which clears the timer
         addBotTimer(() => startBotRack(rackWinner), Math.round(1500 * delayScale));
       }
     } else if (res.foul) {
@@ -1135,6 +1156,7 @@ function finishShot() {
     }
     toast(msg, kind);
   }
+  if (ev.offTable.length && mode !== 'bot') toast('Bi bay khỏi bàn!', 'bad');
   if (mode !== 'bot') syncControls();
   syncPottedUi();
   panel.refreshTray((id) => !!ball(id));
@@ -1584,6 +1606,7 @@ function syncBotUi() {
 
 function startBotRack(breaker = state.bot.breaker) {
   clearBotTimers();
+  state.bot.pendingRack = null;
   if (state.bot.game === '8ball') rackEight();
   else rackNine();
   state.zone = null;
@@ -1596,6 +1619,7 @@ function startBotRack(breaker = state.bot.breaker) {
   panel.spinPad.set(state.tip, true);
   state.bot.breaker = breaker;
   state.bot.turn = breaker;
+  state.elevation = DEFAULT_ELEVATION_DEG;
   state.bot.groups = { player: null, bot: null, bot1: null, bot2: null };
   state.bot.onBreak = true;
   state.bot.ballInHand = true;
@@ -1617,7 +1641,7 @@ function scheduleBotTurn() {
   clearBotTimers();
   if (state.mode !== 'bot' || state.phase !== 'aim') return;
   if (!isBotTurn()) return;
-  if (state.bot.paused) return;
+  if (state.bot.paused || state.bot.matchOver) return;
 
   state.bot.thinking = true;
   state.bot.feathering = false;
@@ -1944,7 +1968,7 @@ function syncControls() {
     tip: state.tip,
     elevation: elevation(),
     comp: state.compensate && compAllowedMode(),
-    elevationLocked: state.mode !== 'free',
+    elevationLocked: elevationLocked(),
     compLocked: !compAllowedMode(),
     tipLocked: state.mode === 'squirt' || state.mode === 'thickness' || isBotTurn(),
   });
@@ -2136,7 +2160,8 @@ const panel = createPanel({
       state.bot.statusText = 'Trận đấu đang tạm dừng (⏸). Nhấn Tiếp tục để chạy.';
     } else {
       state.bot.statusText = 'Tiếp tục trận đấu (▶)...';
-      scheduleBotTurn();
+      if (state.bot.pendingRack && !state.bot.matchOver) startBotRack(state.bot.pendingRack);
+      else scheduleBotTurn();
     }
     syncBotUi();
   },
@@ -2354,7 +2379,7 @@ keys = createKeyboard({
     getTip: () => ({ ...state.tip }),
     setTip: (t) => panel.spinPad.set(t), // non-silent: updates the label and state.tip through onTip
     miscueLimit: () => eq.cue.miscueLimit,
-    elevation: () => (state.mode === 'free' && state.phase === 'aim' ? state.elevation : null),
+    elevation: () => ((state.mode === 'free' || (state.mode === 'bot' && !isBotTurn())) && state.phase === 'aim' ? state.elevation : null),
     setElevation: (e) => {
       state.elevation = e;
       syncControls();
@@ -2441,7 +2466,7 @@ keys = createKeyboard({
       tip: state.tip,
       miscue: eq.cue.miscueLimit,
       elevation: elevation(),
-      elevEditable: state.mode === 'free',
+      elevEditable: !elevationLocked(),
     }),
   },
 });
@@ -2517,6 +2542,12 @@ if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
   let swReloading = false;
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!hadSwController || swReloading) return;
+    // Match state lives only in memory: never reload in the middle of a match or a shot.
+    // The new version is picked up on the next visit (the worker is network-first).
+    if (state.phase !== 'aim' || strokePending || (isBotMode() && !state.lobbyOpen && !state.bot.matchOver)) {
+      panel.toast('Đã có bản cập nhật — sẽ áp dụng ở lần mở app tiếp theo', 'ok');
+      return;
+    }
     swReloading = true;
     location.reload();
   });

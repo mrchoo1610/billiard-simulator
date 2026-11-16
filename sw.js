@@ -1,5 +1,5 @@
 // Network-first service worker for fresh app updates with offline cache fallback.
-const CACHE_VERSION = 'bida9-v39';
+const CACHE_VERSION = 'bida9-v41';
 const SHELL = [
   './',
   'index.html',
@@ -36,7 +36,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches
       .keys()
-      .then((keys) => Promise.all(keys.map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE_VERSION).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });
@@ -47,7 +47,17 @@ self.addEventListener('fetch', (event) => {
   const h = self.location.hostname;
   const isLocal = h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.') || h.startsWith('10.') || h.startsWith('172.') || h.endsWith('.local');
   if (isLocal) {
-    event.respondWith(fetch(req, { cache: 'no-cache' }).catch(() => caches.match(req, { ignoreSearch: true })));
+    event.respondWith(
+      fetch(req, { cache: 'no-cache' })
+        .then((res) => {
+          if (res && res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE_VERSION).then((c) => c.put(req, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req, { ignoreSearch: true })),
+    );
     return;
   }
   event.respondWith(

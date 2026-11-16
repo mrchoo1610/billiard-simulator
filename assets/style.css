@@ -1464,12 +1464,18 @@ body[data-app="bvb"] .kb-hudwrap {
 }
 
 @media (max-width: 640px) {
+  /* Phones: the panel under the table already shows score, turn, target, power and tip, so the overlays
+     would only cover the table. The scoreboard comes back in "Bàn xem" mode, where the panel is hidden. */
+  .shot-spec-hud,
+  body:not(.side-collapsed) .tv-scoreboard { display: none; }
   .tv-scoreboard {
-    min-width: 270px;
-    max-width: calc(100% - 130px);
+    min-width: 0;
+    max-width: calc(100% - 16px);
     bottom: 8px;
     left: 8px;
   }
+  .main-modes { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .main-modes::-webkit-scrollbar { display: none; }
   .tv-pname { font-size: 11.5px; }
   .tv-pscore { font-size: 16px; min-width: 18px; }
   body[data-mode="bot"] .potted-tray {

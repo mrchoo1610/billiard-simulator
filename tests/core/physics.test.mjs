@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { R, buildTable } from '../../src/core/table.js';
 import { computeShot, isPathBlocked, bestPocket, firstHit } from '../../src/core/geometry.js';
-import { createBall, createSim, simulate, computeLaunch, DT } from '../../src/core/physics.js';
+import { createBall, createSim, simulate, computeLaunch, DT, TABLE_BOUNCE_E, HOP_ABSORB } from '../../src/core/physics.js';
+import { stickSpeed, ballSpeed } from '../../src/core/equipment.js';
+import { evaluateNineBallTurn } from '../../src/features/bot.js';
 import { tablePreset, cuePreset, defaultTable, defaultCue } from '../../src/core/equipment.js';
 
 const GEO = buildTable(defaultTable());
@@ -342,4 +344,160 @@ test('firstHit: 30 degree cut matches computeShot; misses, balls behind and igno
   const b2 = [createBall(1, 1000, 500)];
   assert.ok(firstHit({ x: 200, y: 500 + 2 * R - 0.5 }, { x: 1, y: 0 }, b2, R));
   assert.equal(firstHit({ x: 200, y: 500 + 2 * R + 0.5 }, { x: 1, y: 0 }, b2, R), null);
+});
+
+// ---------------------------------------------------------------- Phase 7: realistic jump shot & massé
+
+const AIM_X = { x: 1, y: 0 };
+const TIP0 = { x: 0, y: 0 };
+const rng5 = () => 0.5;
+const Jof = (cue, power) => ballSpeed(cue, stickSpeed(power));
+
+test('launch: horizontal speed = J*cos(theta); spin magnitude at a level cue follows (p x J)/I', () => {
+  const cue = defaultCue();
+  const J = Jof(cue, 0.5);
+  for (const th of [0, 30, 60]) {
+    const L = computeLaunch(AIM_X, 0.5, TIP0, cue, rng5, th);
+    const want = J * Math.cos((th * Math.PI) / 180);
+    assert.ok(Math.abs(L.speed - want) / want < 0.005, `theta ${th}: ${L.speed} vs ${want}`);
+  }
+  // level cue, tip 0.4 below centre: |p x J| = R*0.4*J, w = |p x J| / (0.4 R^2) * efficiency
+  const L = computeLaunch(AIM_X, 0.5, { x: 0, y: -0.4 }, cue, rng5, 0);
+  const wMag = (R * 0.4 * J * cue.spinEfficiency) / (0.4 * R * R);
+  const got = Math.hypot(L.w.x, L.w.y, L.w.z);
+  assert.ok(Math.abs(got - wMag) / wMag < 1e-9, `spin magnitude ${got} vs ${wMag}`);
+});
+
+test('no hop: a 5 degree cue never hops (even at full power); a level cue never hops; formula', () => {
+  const cue = defaultCue();
+  assert.equal(computeLaunch(AIM_X, 1, TIP0, cue, rng5, 5).vz, 0);
+  for (const p of [0.1, 0.5, 1]) assert.equal(computeLaunch(AIM_X, p, TIP0, cue, rng5, 0).vz, 0);
+  const J = Jof(cue, 0.4);
+  const L = computeLaunch(AIM_X, 0.4, TIP0, cue, rng5, 45);
+  const want = Math.max(0, TABLE_BOUNCE_E * J * Math.sin(Math.PI / 4) - HOP_ABSORB);
+  assert.ok(Math.abs(L.vz - want) < 1e-6);
+  assert.equal(computeLaunch(AIM_X, 0.5, { x: 0.9, y: 0 }, cue, rng5, 60).vz, 0, 'miscue never hops');
+});
+
+test('jump: 45 deg, 40 % hops 50..120 mm and lands 500..1300 mm away', () => {
+  const sim = createSim([createBall(0, 300, 600)], { table: defaultTable(), cue: defaultCue(), rng: rng5 });
+  sim.strike({ aimDir: AIM_X, power: 0.4, tip: TIP0, elevationDeg: 45 });
+  const b = sim.balls[0];
+  let maxZ = 0;
+  let takeoff = false;
+  let landedAt = null;
+  for (let i = 0; i < 6000 && landedAt === null; i++) {
+    sim.substep();
+    if (b.z > 0) takeoff = true;
+    maxZ = Math.max(maxZ, b.z);
+    if (takeoff && b.z === 0) landedAt = b.pos.x;
+  }
+  assert.ok(maxZ > 50 && maxZ < 120, `hop ${maxZ}`);
+  const range = landedAt - 300;
+  assert.ok(range > 500 && range < 1300, `air range ${range}`);
+  assert.equal(sim.events.offTable.length, 0);
+});
+
+test('jump clears a blocker and hits the target first without touching the blocker', () => {
+  const balls = [createBall(0, 500, 600), createBall(2, 700, 600), createBall(1, 1300, 600)];
+  const res = simulate(balls, { aimDir: AIM_X, power: 0.38, tip: TIP0, elevationDeg: 50 }, { rng: rng5, orientation: false, recordPaths: false });
+  assert.equal(res.events.firstContact, 1);
+  assert.equal(res.events.contacts.filter((c) => c.a === 2 || c.b === 2).length, 0, 'blocker untouched');
+  assert.ok(!res.events.potted.includes(0));
+});
+
+test('massé: 72 deg, 15 %, right english curves right (left english mirrors), ball stays on the cloth', () => {
+  for (const sgn of [1, -1]) {
+    const start = { x: 300, y: 635 };
+    const sim = createSim([createBall(0, start.x, start.y)], { table: defaultTable(), cue: defaultCue(), rng: rng5 });
+    sim.strike({ aimDir: AIM_X, power: 0.15, tip: { x: 0.42 * sgn, y: 0 }, elevationDeg: 72 });
+    const b = sim.balls[0];
+    let maxZ = 0;
+    let lateral400 = null;
+    let endDir = null;
+    let landed = false;
+    for (let i = 0; i < 12000; i++) {
+      sim.substep();
+      maxZ = Math.max(maxZ, b.z);
+      if (b.z > 0) landed = true;
+      if (lateral400 === null && b.pos.x - start.x >= 400) lateral400 = (b.pos.y - start.y) * sgn;
+      // end of the slide (rolling on the cloth): record the travel direction once
+      if (landed && b.z === 0 && !b.sliding && endDir === null && (b.vel.x !== 0 || b.vel.y !== 0)) {
+        endDir = { x: b.vel.x, y: b.vel.y * sgn };
+      }
+      if (!sim.isMoving()) break;
+    }
+    assert.ok(maxZ <= 30, `max z ${maxZ}`);
+    assert.ok(lateral400 !== null && lateral400 >= 60, `lateral offset after 400 mm: ${lateral400}`);
+    assert.ok(endDir, 'ball rolls after the slide');
+    const turn = (Math.atan2(endDir.y, endDir.x) * 180) / Math.PI;
+    assert.ok(turn >= 25, `direction turned ${turn.toFixed(1)} deg`);
+  }
+});
+
+test('airborne: vel and spin constant while z > 0; landing with back-spin slip changes vel', () => {
+  const sim = createSim([createBall(0, 300, 600)], { table: defaultTable(), cue: defaultCue(), rng: rng5 });
+  sim.strike({ aimDir: AIM_X, power: 0.4, tip: { x: 0, y: -0.3 }, elevationDeg: 50 });
+  const b = sim.balls[0];
+  let v0 = null;
+  let w0 = null;
+  let vBefore = null;
+  let vAfter = null;
+  for (let i = 0; i < 4000; i++) {
+    sim.substep();
+    if (b.z > 0) {
+      if (!v0) {
+        v0 = { ...b.vel };
+        w0 = { ...b.w };
+      }
+      assert.ok(Math.abs(b.vel.x - v0.x) < 1e-9 && Math.abs(b.vel.y - v0.y) < 1e-9, 'vel constant in the air');
+      assert.ok(Math.abs(b.w.x - w0.x) + Math.abs(b.w.y - w0.y) + Math.abs(b.w.z - w0.z) < 1e-9, 'spin constant in the air');
+      vBefore = { ...b.vel };
+    } else if (vBefore) {
+      vAfter = { ...b.vel };
+      break;
+    }
+  }
+  assert.ok(vBefore && vAfter, 'took off and landed');
+  assert.ok(Math.abs(vAfter.x - vBefore.x) > 1, `landing friction changed vel: ${vBefore.x} -> ${vAfter.x}`);
+});
+
+test('off table: a hard 45 deg shot over a long rail leaves the table; 9-ball turn is a foul', () => {
+  const balls = [createBall(0, 600, 635), createBall(1, 1200, 300), createBall(9, 1400, 900)];
+  const res = simulate(balls, { aimDir: { x: -1, y: 0 }, power: 1, tip: TIP0, elevationDeg: 45 }, { rng: rng5, orientation: false });
+  assert.ok(res.events.offTable.includes(0), 'cue ball off the table');
+  const cb = res.balls.find((b) => b.id === 0);
+  assert.ok(cb.potted && cb.offTable);
+  assert.ok(!res.events.drops.some((d) => d.id === 0));
+  const ev = evaluateNineBallTurn({ ballsBefore: balls, simBalls: res.balls, events: res.events, geo: GEO });
+  assert.equal(ev.foul, true);
+  assert.equal(ev.foulReason, 'Bi bay khỏi bàn');
+  assert.deepEqual(ev.offTable, [0]);
+});
+
+test('3D contact: a ball dropped on the edge of a resting ball stays finite and conserves momentum', () => {
+  const rest = createBall(1, 800, 600);
+  const drop = createBall(0, 800 + 1.2 * R, 600);
+  drop.z = 80;
+  drop.vz = -800;
+  const sim = createSim([drop, rest], { table: defaultTable(), cue: defaultCue(), rng: rng5 });
+  let maxStep = 0;
+  let prev = sim.balls.map((b) => ({ x: b.pos.x, y: b.pos.y }));
+  let pAfter = null;
+  for (let i = 0; i < 3000; i++) {
+    sim.substep();
+    sim.balls.forEach((b, k) => {
+      assert.ok(Number.isFinite(b.pos.x) && Number.isFinite(b.pos.y) && Number.isFinite(b.z) && Number.isFinite(b.vz));
+      maxStep = Math.max(maxStep, Math.hypot(b.pos.x - prev[k].x, b.pos.y - prev[k].y));
+      prev[k] = { x: b.pos.x, y: b.pos.y };
+    });
+    if (pAfter === null && sim.events.contacts.length) {
+      // right after the contact (cloth friction has acted for at most a step): total horizontal momentum is still ~0
+      pAfter = Math.hypot(sim.balls[0].vel.x + sim.balls[1].vel.x, sim.balls[0].vel.y + sim.balls[1].vel.y);
+    }
+  }
+  assert.ok(maxStep < 15, `max single-step displacement ${maxStep}`);
+  assert.ok(pAfter !== null, 'contact recorded');
+  assert.ok(pAfter < 0.01 * 800, `horizontal momentum after contact ${pAfter}`);
+  for (const b of sim.balls) assert.equal(b.z, 0);
 });

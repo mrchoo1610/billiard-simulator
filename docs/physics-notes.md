@@ -36,6 +36,18 @@ Dò tia tâm bi cái theo hướng đã cộng squirt; bi đầu tiên có kho�
 
 solveAim bắt đầu từ đường bi ma, mô phỏng từ lúc đánh đến lần chạm bi đầu tiên + 50 ms, đo sai lệch hướng bi mục tiêu so với đường tới lỗ, rồi dò nghiệm theo góc ngắm bằng phương pháp cát tuyến (±8°, ≤ 12 vòng, dung sai 0,02°). Các thành phần: squirt = góc xoay hướng xuất phát; cong = góc giữa hướng xuất phát và hướng từ điểm đầu tới tâm bi cái lúc chạm; throw = góc giữa hướng bi mục tiêu và đường nối tâm lúc chạm. Dấu + = lệch sang phải hướng bi đi (xoay cùng chiều kim đồng hồ trên màn hình). Bảng thông tin hiện squirt+cong (độ lệch bi cái) và throw (bi mục tiêu) ở hai dòng riêng; "Ngắm bù" là góc xoay ngắm thực sự, một kết quả tổng hợp — không bằng tổng các góc thành phần.
 
+## Nhảy bi & massé (Giai đoạn 7)
+
+Một mô hình duy nhất, không có cờ "jump" và không có ngưỡng góc/lực. Cơ ép bi xuống mặt đá với xung J·sinθ, mặt bàn trả lại một phần; chỉ thành phần ngang J·cosθ đẩy bi đi tới.
+
+- J = ballSpeed(cue, stickSpeed(power)); tốc độ ngang = J·cosθ; xoáy w = (p × J·dc)/I · hiệu suất (dc = (cosθ·d, −sinθ)).
+- Nảy lên: vz = max(0, TABLE_BOUNCE_E·J·sinθ − HOP_ABSORB), TABLE_BOUNCE_E = 0,5, HOP_ABSORB = 600 mm/s (cơ 5° không bao giờ làm bi nhảy, kể cả khi phá bi). Miscue: vz = 0.
+- Trên không: không ma sát vải, vận tốc và xoáy giữ nguyên, z += vz·dt, vz −= G·dt.
+- Chạm bàn (vin = |vz|): nảy vz = 0,5·vin nếu > 150 mm/s, ngược lại 0; ma sát va chạm Δv = −û·min(μ·(1+e)·vin, (2/7)|u|) trên độ trượt điểm tiếp xúc u, xoáy cập nhật theo cùng quan hệ với nhánh trượt.
+- Bi–bi 3D: nếu một bi ở trên không hoặc đang có vz thì dùng pháp tuyến 3D, xung pháp tuyến không ma sát (1+E_BALL)/2·vn lên (vx, vy, vz); hai bi đều nằm trên vải thì giữ nguyên nhánh 2D (throw).
+- Băng/lỗ: z < RAIL_TOP_H (46 mm) băng và má lỗ hoạt động như cũ; z ≥ 46 mm bỏ qua băng, tâm bi ra ngoài mặt bàn thì bi bay khỏi bàn (potted + offTable, ghi vào events.offTable, không vào events.drops, là lỗi "Bi bay khỏi bàn"). Lỗ chỉ bắt bi khi z < POT_MAX_Z = 20 mm.
+- Ví dụ (cơ mặc định): 45°/40 % → tốc độ ≈ 3670 mm/s, vz ≈ 1235, nhảy cao ≈ 78 mm, bay xa ≈ 920 mm; 72°/15 % (massé) → ≈ 730 mm/s, vz ≈ 523, cao ≈ 14 mm.
+
 ## Giới hạn
 
-Không có bi nhảy / massé mạnh, throw chỉ phụ thuộc tốc độ trượt (không có độ bẩn/phấn), giới hạn dính |vt|/7 dùng chung cho cả phương đứng (gần đúng), squirt tuyến tính, lỗ không có má cong. Đường kính đầu cơ, độ cứng đầu cơ và loại ngọn chỉ để ghi nhớ trong giao diện.
+Throw chỉ phụ thuộc tốc độ trượt (không có độ bẩn/phấn), giới hạn dính |vt|/7 dùng chung cho cả phương đứng (gần đúng), squirt tuyến tính, lỗ không có má cong. Đường kính đầu cơ, độ cứng đầu cơ và loại ngọn chỉ để ghi nhớ trong giao diện.

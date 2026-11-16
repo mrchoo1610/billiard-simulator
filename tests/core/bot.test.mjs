@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { R, buildTable } from '../../src/core/table.js';
 import { minCueElevationDeg, effectiveCueElevationDeg, railSurfaceHeight } from '../../src/core/geometry.js';
-import { createBall, simulate } from '../../src/core/physics.js';
+import { createBall, simulate, Sim } from '../../src/core/physics.js';
 import { cuePose, fromThree, MM, CAMERA_MODES, CAMERA_MODE_LABEL, nextCameraMode } from '../../src/ui/view3d-math.js';
 import { tablePreset, cuePreset } from '../../src/core/equipment.js';
 import { dist } from '../../src/core/vec.js';
@@ -466,17 +466,21 @@ test('Hero skills: Jump shot and Massé curve shot solvers when snookered', () =
   assert.equal(jumpShot.kind, 'jump');
   assert.equal(jumpShot.targetId, 1);
   assert.ok(jumpShot.elevationDeg >= 40, 'Elevated stroke for jump');
-  assert.ok(jumpShot.power >= 0.78, 'Strong power for jump');
+  assert.ok(!('jump' in jumpShot), 'no jump flag any more');
 
-  // Verify jump simulation: hops over blocker 2, hits target 1 first
+  // Verify jump simulation: hops over blocker 2, hits target 1 first, directly
   const simResJ = simulate(ballsJ, jumpShot, { table: eq.table, cue: eq.cue, rng: () => 0.5, orientation: false, recordPaths: false });
+  const firstJ = simResJ.events.contacts.find((c) => c.a === 0 || c.b === 0);
   assert.equal(simResJ.events.firstContact, 1, 'Cue hopped over blocker 2 and made first contact with target 1');
+  assert.equal(simResJ.events.cushionHits.filter((c) => c.id === 0 && c.time < firstJ.time).length, 0, 'Cue reached the target directly, not off a cushion');
+  assert.equal(simResJ.events.contacts.filter((c) => c.time <= firstJ.time && (c.a === 2 || c.b === 2)).length, 0, 'Blocker not touched');
   assert.equal(simResJ.events.potted.includes(0), false, 'Cue did not scratch');
+  assert.equal(simResJ.events.offTable.length, 0, 'Nothing left the table');
 
-  // 2. Massé curve shot test: Blocker ball 2 close to cue (70mm away), curves around it
+  // 2. Massé curve shot test: blocker 2 at 260 mm, the cue ball must curve round it (not hop over it)
   const cueM = createBall(0, 500, 600);
-  const blockerM = createBall(2, 570, 600);
-  const targetM = createBall(1, 1100, 600);
+  const blockerM = createBall(2, 760, 600);
+  const targetM = createBall(1, 1200, 600);
   const ballsM = [cueM, blockerM, targetM];
 
   const masseShot = findMasseShot(ballsM, cueM, [targetM], eq, geo);
@@ -486,10 +490,20 @@ test('Hero skills: Jump shot and Massé curve shot solvers when snookered', () =
   assert.ok(masseShot.elevationDeg >= 58, 'Steep elevation for massé curve');
   assert.ok(Math.abs(masseShot.tip.x) >= 0.4, 'Strong side english applied');
 
-  // Verify massé simulation: curves around blocker 2, hits target 1 first
-  const simResM = simulate(ballsM, masseShot, { table: eq.table, cue: eq.cue, rng: () => 0.5, orientation: false, recordPaths: false });
-  assert.equal(simResM.events.firstContact, 1, 'Cue curved around blocker 2 and made first contact with target 1');
-  assert.equal(simResM.events.potted.includes(0), false, 'Cue did not scratch');
+  const simM = new Sim(ballsM, { table: eq.table, cue: eq.cue, rng: () => 0.5, orientation: false });
+  simM.strike(masseShot);
+  let maxZ = 0;
+  while (simM.isMoving() && simM.time < 6) {
+    simM.substep();
+    maxZ = Math.max(maxZ, simM.cue.z);
+  }
+  const evM = simM.events;
+  const firstM = evM.contacts.find((c) => c.a === 0 || c.b === 0);
+  assert.equal(evM.firstContact, 1, 'Cue curved around blocker 2 and made first contact with target 1');
+  assert.equal(evM.cushionHits.filter((c) => c.id === 0 && c.time < firstM.time).length, 0, 'No cushion before the contact');
+  assert.equal(evM.contacts.filter((c) => c.time <= firstM.time && (c.a === 2 || c.b === 2)).length, 0, 'Blocker not touched');
+  assert.equal(evM.potted.includes(0), false, 'Cue did not scratch');
+  assert.ok(maxZ <= 30, `Massé curves, it does not hop over (max z ${maxZ.toFixed(1)} mm)`);
 
   // 3. chooseBotShot in snookered situation with Hero difficulty executes trick shot
   const heroShot = chooseBotShot(ballsJ, geo, eq, 'hero');

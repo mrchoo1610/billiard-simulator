@@ -704,6 +704,7 @@ export async function createView3D(host) {
   }
 
   function updateCamera(sc, now) {
+    animatingNow = false; // recomputed every frame: a latched flag would keep WebGL rendering while idle
     const dt = lastNow ? Math.min(0.1, (now - lastNow) / 1000) : 1 / 60;
     lastNow = now;
     const shooting = sc.phase === 'shooting';

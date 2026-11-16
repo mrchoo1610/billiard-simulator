@@ -293,9 +293,12 @@ export function evaluateNineBallTurn({ ballsBefore, simBalls, events, geo }) {
   const firstTime = firstContactEv ? firstContactEv.time : 0;
   const hasCushionAfter = (events?.cushionHits || []).some((ch) => ch.time >= firstTime - 1e-6);
 
+  const offTable = events?.offTable || [];
   let foulReason = '';
-  if (cuePotted) {
+  if (cuePotted && !offTable.includes(0)) {
     foulReason = 'Bi cái rơi lỗ (Scratch)';
+  } else if (offTable.length) {
+    foulReason = 'Bi bay khỏi bàn';
   } else if (firstContact === null) {
     foulReason = 'Không chạm bi mục tiêu';
   } else if (lowestId !== null && firstContact !== lowestId) {
@@ -324,6 +327,7 @@ export function evaluateNineBallTurn({ ballsBefore, simBalls, events, geo }) {
     pottedObj,
     cuePotted,
     ninePotted,
+    offTable,
   };
 }
 
@@ -345,9 +349,12 @@ export function evaluateEightBallTurn({ ballsBefore, simBalls, events, turn, gro
   const firstTime = firstContactEv ? firstContactEv.time : 0;
   const hasCushionAfter = (events?.cushionHits || []).some((ch) => ch.time >= firstTime - 1e-6);
 
+  const offTable = events?.offTable || [];
   let foulReason = '';
-  if (cuePotted) {
+  if (cuePotted && !offTable.includes(0)) {
     foulReason = 'Bi cái rơi lỗ (Scratch)';
+  } else if (offTable.length) {
+    foulReason = 'Bi bay khỏi bàn';
   } else if (firstContact === null) {
     foulReason = 'Không chạm bi mục tiêu';
   } else if (!onBreak && shooterGroup === null && firstContact === 8) {
@@ -430,6 +437,7 @@ export function evaluateEightBallTurn({ ballsBefore, simBalls, events, turn, gro
     pottedObj,
     cuePotted,
     eightPotted,
+    offTable,
   };
 }
 
@@ -565,7 +573,7 @@ function probeOutcome(balls, aimDir, power, tip, elevationDeg, targetId, nextTar
     { aimDir, power, tip, elevationDeg },
     { table: eq.table, cue: eq.cue, rng: () => 0.5, orientation: false, recordPaths: false },
   );
-  const cuePotted = res.events.potted.includes(0);
+  const cuePotted = res.events.potted.includes(0) || res.events.offTable.length > 0;
   const objPotted = res.events.potted.includes(targetId);
   const earlyEight = avoidEight && res.events.potted.includes(8);
   let posScore = 0;
@@ -619,7 +627,7 @@ function findKickOrSafeShot(balls, cue, target, eq, geo) {
       { table: eq.table, cue: eq.cue, rng: rng0, orientation: false, recordPaths: false, maxTime: 3.5 },
     );
     if (res.events.firstContact !== target.id) return false;
-    const cuePotted = res.events.potted.includes(0);
+    const cuePotted = res.events.potted.includes(0) || res.events.offTable.length > 0;
     const firstEv = (res.events.contacts || []).find((c) => c.a === 0 || c.b === 0);
     const t0 = firstEv ? firstEv.time : 0;
     const cushionOk =
@@ -658,8 +666,29 @@ function findKickOrSafeShot(balls, cue, target, eq, geo) {
 }
 
 /**
+ * A trick shot is accepted only when the cue ball reaches the legal target directly: first contact is the target,
+ * no cue-ball cushion before it, the blocker is not in any contact before it, no scratch, nothing leaves the table.
+ */
+function reachesTargetDirectly(res, targetId, blockerId) {
+  const ev = res.events;
+  if (ev.firstContact !== targetId) return false;
+  if (ev.potted.includes(0) || ev.offTable.length) return false;
+  const first = ev.contacts.find((c) => c.a === 0 || c.b === 0);
+  if (!first || (first.a !== targetId && first.b !== targetId)) return false;
+  const t0 = first.time;
+  if (ev.cushionHits.some((ch) => ch.id === 0 && ch.time < t0 - 1e-9)) return false;
+  if (ev.contacts.some((c) => c.time <= t0 + 1e-9 && (c.a === blockerId || c.b === blockerId))) return false;
+  return true;
+}
+
+const pocketIdxOf = (res, targetId) => {
+  const d = res.events.drops.find((x) => x.id === targetId);
+  return d ? d.pocketId : -1;
+};
+
+/**
  * Find a jumping stroke over an obstacle ball to hit a legal target.
- * Used by Hero bot when direct trajectory is blocked.
+ * Used by Hero bot when direct trajectory is blocked. Uses the real launch model (steep cue, firm stroke).
  */
 export function findJumpShot(balls, cue, legalTargets, eq, geo) {
   const rng0 = () => 0.5;
@@ -694,9 +723,9 @@ export function findJumpShot(balls, cue, legalTargets, eq, geo) {
       allDirs.push(rotate(dir, rad(1.2)));
     }
 
-    const elevations = [42, 46, 50];
-    const powers = [0.82, 0.88];
-    const tip = { x: 0, y: 0.15 };
+    const elevations = [40, 46, 52, 58];
+    const powers = [0.3, 0.36, 0.42, 0.5];
+    const tip = { x: 0, y: 0.1 };
 
     for (const dir of allDirs) {
       for (const elev of elevations) {
@@ -704,27 +733,26 @@ export function findJumpShot(balls, cue, legalTargets, eq, geo) {
           const res = simulate(
             balls,
             { aimDir: dir, power, tip, elevationDeg: elev },
-            { table: eq.table, cue: eq.cue, rng: rng0, orientation: false, recordPaths: false, maxTime: 5.5 },
+            { table: eq.table, cue: eq.cue, rng: rng0, orientation: false, recordPaths: false, maxTime: 4 },
           );
-
-          if (res.events.firstContact === tgt.id && !res.events.potted.includes(0)) {
-            let sc = 6;
-            if (res.events.potted.includes(tgt.id)) sc += 20;
-            sc -= res.events.cushionHits.length * 0.2;
-            if (sc > bestScore) {
-              bestScore = sc;
-              best = {
-                targetId: tgt.id,
-                pocketIdx: res.events.potted.includes(tgt.id) ? 0 : -1,
-                aimDir: dir,
-                power,
-                tip,
-                elevationDeg: elev,
-                kind: 'jump',
-                potted: res.events.potted.includes(tgt.id),
-              };
-              if (sc >= 20) return best;
-            }
+          if (!reachesTargetDirectly(res, tgt.id, blockerId)) continue;
+          const potted = res.events.potted.includes(tgt.id);
+          let sc = 6;
+          if (potted) sc += 20;
+          sc -= res.events.cushionHits.length * 0.2;
+          if (sc > bestScore) {
+            bestScore = sc;
+            best = {
+              targetId: tgt.id,
+              pocketIdx: pocketIdxOf(res, tgt.id),
+              aimDir: dir,
+              power,
+              tip,
+              elevationDeg: elev,
+              kind: 'jump',
+              potted,
+            };
+            if (potted) return best;
           }
         }
       }
@@ -736,57 +764,60 @@ export function findJumpShot(balls, cue, legalTargets, eq, geo) {
 
 /**
  * Find a curved massé stroke bending around an obstacle ball to hit a legal target.
- * Uses high elevation (60-72 deg) with strong side english.
+ * Steep cue (60-72 deg), soft stroke, side english: the ball stays on the cloth and curves back after passing the blocker.
  */
 export function findMasseShot(balls, cue, legalTargets, eq, geo) {
   const rng0 = () => 0.5;
   let best = null;
   let bestScore = -Infinity;
+  const MAX_SIMS = 400;
 
   for (const tgt of legalTargets) {
     const blockerId = isPathBlocked(cue.pos, tgt.pos, balls, R, [0, tgt.id]);
     if (blockerId === null) continue;
 
     const baseAng = Math.atan2(tgt.pos.y - cue.pos.y, tgt.pos.x - cue.pos.x);
-
-    const curveConfigs = [
-      { tip: { x: 0.44, y: -0.22 }, offsets: [10, 16, 22, 28, 34, 40] },
-      { tip: { x: -0.44, y: -0.22 }, offsets: [-10, -16, -22, -28, -34, -40] },
-    ];
-
+    const offsets = [];
+    for (let o = 8; o <= 60; o += 4) offsets.push(o);
     const elevations = [60, 66, 72];
-    const powers = [0.58, 0.68];
+    const powers = [0.12, 0.16, 0.2, 0.26, 0.32];
+    const tys = [-0.15, 0, 0.15];
+    let sims = 0;
 
-    for (const cfg of curveConfigs) {
-      for (const off of cfg.offsets) {
-        const ang = baseAng + rad(off);
+    // side = +1: aim to the right of the line (+angle on the y-down screen), english on the left brings it back
+    for (const off of offsets) {
+      for (const side of [1, -1]) {
+        const ang = baseAng + rad(side * off);
         const dir = { x: Math.cos(ang), y: Math.sin(ang) };
-
-        for (const elev of elevations) {
-          for (const power of powers) {
-            const res = simulate(
-              balls,
-              { aimDir: dir, power, tip: cfg.tip, elevationDeg: elev },
-              { table: eq.table, cue: eq.cue, rng: rng0, orientation: false, recordPaths: false, maxTime: 6.5 },
-            );
-
-            if (res.events.firstContact === tgt.id && !res.events.potted.includes(0)) {
+        for (const power of powers) {
+          for (const elev of elevations) {
+            for (const ty of tys) {
+              if (sims >= MAX_SIMS) break;
+              sims++;
+              const tip = { x: -side * 0.42, y: ty };
+              const res = simulate(
+                balls,
+                { aimDir: dir, power, tip, elevationDeg: elev },
+                { table: eq.table, cue: eq.cue, rng: rng0, orientation: false, recordPaths: false, maxTime: 4 },
+              );
+              if (!reachesTargetDirectly(res, tgt.id, blockerId)) continue;
+              const potted = res.events.potted.includes(tgt.id);
               let sc = 5;
-              if (res.events.potted.includes(tgt.id)) sc += 20;
+              if (potted) sc += 20;
               sc -= res.events.cushionHits.length * 0.2;
               if (sc > bestScore) {
                 bestScore = sc;
                 best = {
                   targetId: tgt.id,
-                  pocketIdx: res.events.potted.includes(tgt.id) ? 0 : -1,
+                  pocketIdx: pocketIdxOf(res, tgt.id),
                   aimDir: dir,
                   power,
-                  tip: cfg.tip,
+                  tip,
                   elevationDeg: elev,
                   kind: 'masse',
-                  potted: res.events.potted.includes(tgt.id),
+                  potted,
                 };
-                if (sc >= 20) return best;
+                if (potted) return best;
               }
             }
           }
@@ -961,9 +992,7 @@ export function chooseBotShot(balls, geo, eq, difficulty = 'medium', opts = {}) 
     }
     if ((!trickShot || !trickShot.potted) && diff.canMasse) {
       const masse = findMasseShot(balls, cue, legalTargets, eq, geo);
-      if (masse && (!trickShot || masse.potted || rng() < 0.5)) {
-        trickShot = masse;
-      }
+      if (masse && (!trickShot || masse.potted)) trickShot = masse;
     }
     if (trickShot) {
       const jitterDeg = (rng() - 0.5) * 2 * diff.aimJitterDeg * 0.4;

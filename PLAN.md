@@ -439,3 +439,135 @@ three.js r164 (MIT) is vendored at `assets/vendor/three/three.module.min.js` (+ 
 - Cố định: camera never moves automatically (stays at shot pose). Theo bi cái: behaviour from 6.4.
 - Pure helper in view3d-math.js: `topDownPose(tableW, tableH, fovDeg, aspect)` and a `cameraDirector` state machine
   (input: phase events aim/shot/moving/stopped/scratch + time; output: target pose + blend factor) — unit-tested.
+
+## PHASE 7 — Realistic jump shot & massé (user request: "làm lại logic Massé và nhảy bi cho hợp lý với ngoài đời")
+
+### Why
+Measured on the current engine (see `src/core/physics.js`):
+- `computeLaunch` keeps the **horizontal** ball speed independent of elevation (`jm = full / c`). At 72° / 30 % power the
+  cue ball still leaves at 4058 mm/s, so a massé needs ~2 m to bend 165 mm. A brute-force search (10 000+ shots) found
+  no shot that curves round a fully blocking ball. Real massé: steep cue, soft stroke, slow forward speed, tight curve.
+- The jump is a special case bolted on (`shot.jump`, fade-in thresholds, `JUMP_REBOUND`, `JUMP_MAX_VZ`, `speed * 0.72`).
+  Real jump and real massé are the **same physics**: the cue drives the ball into the slate, the slate returns part of
+  the vertical impulse, and only the horizontal part of the impulse moves the ball forward.
+- Ball–ball contacts use a 2D normal even when one ball is airborne; airborne balls bounce off cushions as if on the
+  cloth and can never leave the table.
+
+### Model (all in `src/core/physics.js`, pure, units mm / s)
+One unified launch, no opt-in flag, no elevation/power thresholds.
+
+1. **Launch** (`computeLaunch`). Let `J = ballSpeed(cue, stickSpeed(power))` (impulse per unit ball mass along the cue,
+   the same value that is today's level-cue speed), `θ` = elevation, cue direction `dc = (cosθ·d, −sinθ)`.
+   - horizontal speed `speed = J·cosθ` along `dir` (squirt unchanged). **This replaces `jm = full / c`: use `jm = J`.**
+   - spin `w = (p × J·dc) / I · spinEfficiency` — same formula as now, with `jm = J`.
+   - vertical: the ball is driven into the slate at `J·sinθ` and rebounds:
+     `vz = max(0, TABLE_BOUNCE_E · J·sinθ − HOP_ABSORB)` with `TABLE_BOUNCE_E = 0.5`, `HOP_ABSORB = 600` mm/s
+     (cloth + tip dwell swallow small hops; a 5° cue never hops, even on the break: 0.5·11974·sin5° = 522 < 600).
+   - Remove the `jump` parameter everywhere (`computeLaunch`, `strike`, `Sim.strike`, `aim-solver.js`, `bot.js`,
+     `app.js: jumpOn`), and remove `JUMP_MIN_ELEVATION_DEG`, `JUMP_MIN_POWER`, `JUMP_MAX_VZ`, `JUMP_REBOUND`, the
+     `ty >= -0.35` rule and the `* 0.72` factor. Keep `vz` in the returned launch object. Miscue: `vz = 0`.
+   - `MAX_ELEVATION_DEG` stays 72.
+
+   Expected numbers (default cue, used by the tests below, ±15 %):
+
+   | shot | J | speed | vz | hop height vz²/2g | air time | air range |
+   |---|---|---|---|---|---|---|
+   | 45°, 40 % | ≈5190 | ≈3670 | ≈1235 | ≈78 mm | ≈0.25 s | ≈920 mm |
+   | 60°, 30 % | ≈4058 | ≈2029 | ≈1157 | ≈68 mm | ≈0.24 s | ≈480 mm |
+   | 72°, 15 % (massé) | ≈2361 | ≈730 | ≈523 | ≈14 mm | ≈0.11 s | ≈80 mm |
+   | 39°, 30 % (jacked up over a ball) | ≈4058 | ≈3154 | ≈677 | ≈23 mm | | |
+
+2. **Flight** (`_move`). While `b.z > 0`: no cloth friction, `vel` and `w` unchanged, `z += vz·dt`, `vz −= G·dt`
+   (already implemented; keep).
+
+3. **Landing** (in `_move`, when `z` reaches 0 with `vz < 0`). Let `vin = |vz|`.
+   - bounce: `vz = TABLE_BOUNCE_E · vin` if that is `> 150` mm/s, else `vz = 0` (replaces the 0.28 / −250 constants).
+   - impact friction: the normal impulse `(1 + e)·vin` gives a friction impulse of at most `muSlide·(1 + e)·vin` on the
+     contact-point slip `u = (v.x + R·w.y, v.y − R·w.x)`; apply `Δv = −û·min(muSlide·(1+e)·vin, (2/7)·|u|)` and the
+     matching spin change `Δw.x = −2.5·Δv.y/R`, `Δw.y = 2.5·Δv.x/R` (same relations as the sliding branch).
+   - A grounded ball that receives a downward `vz` from a collision is handled by the same code path.
+
+4. **Ball–ball in 3D** (`_collide`). Use the 3D centre offset `(dx, dy, dz)`, `dz = b.z − a.z`.
+   - Both balls on the cloth (`a.z === 0 && b.z === 0 && !a.vz && !b.vz`): **exactly the existing 2D code path**
+     (throw / friction model untouched — the Phase 4 tests must stay green without edits).
+   - Otherwise: recompute `dz` after the `tau` rewind, normalise the 3D normal `n`, apply the frictionless normal
+     impulse `jn = (1 + E_BALL)/2 · vn` to `(vel.x, vel.y, vz)` of both balls, and separate the overlap along `n`
+     (clamp `z ≥ 0`). No instantaneous horizontal push larger than the 3D overlap. Record the contact event as today.
+
+5. **Cushions, pockets, leaving the table** (`_walls` / `_jaws`), with `RAIL_TOP_H = 46` (export it from
+   `geometry.js`, it is already defined there) and `POT_MAX_Z = 20`:
+   - `z < RAIL_TOP_H`: cushions and jaws act as today.
+   - `z ≥ RAIL_TOP_H`: cushions and jaws are ignored; when the ball centre is outside the playing rectangle
+     (`depth < 0` for any wall, pocket gap or not) the ball has **left the table**: set `b.potted = true`,
+     `b.offTable = true`, zero its motion, push its id to `events.potted` **and** to a new `events.offTable` array
+     (do **not** push to `events.drops`).
+   - pockets capture only when `z < POT_MAX_Z`.
+   - `cloneBall` / `createBall` carry `offTable: false`.
+
+### Rules (`src/features/bot.js`)
+- `evaluateNineBallTurn` / `evaluateEightBallTurn`: any id in `events.offTable` is a foul with reason
+  `'Bi bay khỏi bàn'` (checked right after the scratch check). Existing consequences then apply unchanged: cue ball →
+  ball in hand; 9 → respot; 8 → rack lost (on the break: respot); other object balls stay off the table.
+- Return `offTable` (array) in the result.
+
+### Bot trick shots (`src/features/bot.js`)
+Both solvers simulate with the real model and must accept a shot only when the cue ball reaches the legal target
+**directly**: `events.firstContact === target`, no cue-ball cushion hit before that contact, the blocker does not
+appear in any contact event before it, cue ball not potted, `events.offTable` empty.
+- `findJumpShot`: directions = straight at the target + ghost-ball lines to open pockets (cut ≤ 60°), each ±1.2°;
+  elevations `[40, 46, 52, 58]`; powers `[0.30, 0.36, 0.42, 0.50]`; tip `{x: 0, y: 0.1}`.
+- `findMasseShot`: for each side (curve left / right) aim offsets `8…60°` in 4° steps to the side the ball must pass,
+  english on the side that brings it back (right english curves right — see the Phase 3 swerve test for the sign),
+  elevations `[60, 66, 72]`, powers `[0.12, 0.16, 0.20, 0.26, 0.32]`, tips `x = ±0.42`, `y ∈ {−0.15, 0, 0.15}`.
+  Stop at the first potting solution; cap the search at 400 simulations per target with `maxTime: 4`.
+- Returned shots: `{targetId, pocketIdx, aimDir, power, tip, elevationDeg, kind}`; `pocketIdx` = the pocket id of the
+  target in `events.drops` when it is potted, else `−1` (fixes the hard-coded `0`).
+- `chooseBotShot`: unchanged order (pot → jump/massé for `canJump`/`canMasse` → kick/safe); prefer a potting trick
+  shot, otherwise the first one found (remove the `rng() < 0.5` coin flip).
+- `probeOutcome` / kick search: treat `events.offTable.length > 0` like a scratch.
+
+### App (`src/app.js`, `src/ui/panel.js`, `index.html` only if needed)
+- Delete `jumpOn`, `state.botJump` and every `jump:` argument.
+- The player may raise the cue in a match: `elevationLocked` only in the three drills (`thickness`, `position`,
+  `squirt`); in `bot` mode on the player's turn `baseElevation()` = `state.elevation`; on a bot turn it stays
+  `state.botElevation`. Reset `state.elevation` to `DEFAULT_ELEVATION_DEG` in `finishShot` (with the existing
+  power / tip reset) and in `startBotRack`.
+- `finishShot`: if `ev.offTable.length`, practice modes toast `Bi bay khỏi bàn!` (`'bad'`); no drop animation or
+  pocket sound for those ids (they are not in `events.drops`), but the potted-tray bookkeeping (`state.pottedIds`)
+  must include them.
+- Renderers already draw `b.z` (`render.js:367`, `render3d.js:416`) — verify, do not rewrite.
+
+### Tests (`node --test`, add to `tests/core/physics.test.mjs` and `tests/core/bot.test.mjs`)
+Replace the test "jump shot: opt-in only…" and the jump / massé part of "Hero skills…" with:
+1. launch: `speed ≈ J·cosθ` for θ = 0, 30, 60 (±0.5 %); spin magnitude at θ = 0 unchanged vs. today.
+2. no hop: θ = 5°, power 1.0 → `vz === 0`; θ = 0 any power → `vz === 0`.
+3. jump: 45°, 40 %, centre tip → max `z` in 50…120 mm; lands (first `z === 0` after take-off) 500…1300 mm away.
+4. jump clears: cue (500,600), blocker (700,600), target (1300,600), 50°, 38 %, aim straight → `firstContact === 1`
+   and no contact event involving the blocker.
+5. massé: 72°, 15 %, tip `{x: 0.42, y: 0}`, aim +x on an empty table → after the ball stops sliding its travel
+   direction is turned ≥ 25° to the right (+y); lateral offset ≥ 60 mm after 400 mm of forward travel; max `z` ≤ 30 mm.
+   Mirror with left english.
+6. airborne: `vel` and `w` constant while `z > 0`; landing with back-spin slip changes `vel` (impact friction).
+7. off table: 45°, power 1.0 aimed at a long rail from 600 mm → `events.offTable` includes 0, ball `potted`;
+   `evaluateNineBallTurn` returns `foul` with reason `'Bi bay khỏi bàn'`.
+8. 3D contact: a ball dropped (`z = 80`, `vz = −800`) onto the edge of a resting ball → no NaN, both end at `z = 0`,
+   no single-step displacement > 15 mm, horizontal momentum conserved within 1 %.
+9. bot jump: the existing layout (cue (500,600), blocker 2 at (680,600), target 1 at (1050,600)) → `findJumpShot`
+   returns a shot, `elevationDeg ≥ 40`, simulation hits 1 first with no cushion before and no blocker contact.
+10. bot massé: cue (500,600), blocker 2 at (760,600), target 1 at (1200,600) → `findMasseShot` returns a shot with
+    `|tip.x| ≥ 0.4`, `elevationDeg ≥ 58`, simulation hits 1 first, no cushion before, **max cue-ball `z` ≤ 30 mm**
+    (it curves, it does not hop over). If the model cannot produce this, **do not weaken the test**: report the
+    measured trajectories instead.
+11. All previously passing tests stay green. Where an old expectation encodes the removed behaviour (horizontal speed
+    independent of elevation at θ > 0), update the expected value to `J·cosθ` and list every such edit in the report.
+    `npm run test:cases` 20/20; `npm run audit` must not get worse than
+    `ĐẠT 26 · MỘT PHẦN 4 · KHÔNG ĐẠT 1 · CHƯA HỖ TRỢ 3` (restore `docs/physics-audit-report.md` with
+    `git checkout -- docs/physics-audit-report.md` after running it unless a row legitimately changed).
+
+### Docs
+- `docs/physics-notes.md`: short section "Nhảy bi & massé (Giai đoạn 7)" with the formulas and constants above.
+- `scripts/physics-audit.mjs` row E1: jump / massé are supported from Phase 7 (remove from the E list).
+
+### Definition of done
+`npm test`, `npm run test:cases` green; audit not worse; no `jump` flag left (`grep -rn "jumpOn\|shot.jump\|JUMP_" src`
+is empty); bump `CACHE_VERSION` in `sw.js`; no git commit.

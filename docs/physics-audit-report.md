@@ -1,13 +1,13 @@
 # Báo cáo kiểm tra vật lý (physics audit)
 
-Sinh bởi `scripts/physics-audit.mjs` (chạy: `npm run audit`) vào 2026-11-13. Tiêu chí: `docs/physics-criteria.md`.
+Sinh bởi `scripts/physics-audit.mjs` (chạy: `npm run audit`) vào 2026-11-16. Tiêu chí: `docs/physics-criteria.md`.
 Thiết bị đo: bàn Club 9ft, gậy mặc định (Fury TK-03) trừ khi ghi chú khác; các thông số là ước lượng, **không được chỉnh để đạt tiêu chí**.
 Quy ước trạng thái: ĐẠT = trong dung sai của tiêu chí; MỘT PHẦN = trong 2× dung sai hoặc đúng chiều nhưng chưa kiểm hết; KHÔNG ĐẠT = ngoài khoảng đó hoặc sai chiều; CHƯA HỖ TRỢ = ngoài phạm vi mô hình (mục E).
 Giá trị kỳ vọng trong tiêu chí là **[Unverified]** (xem đầu `physics-criteria.md`, Bản 2). Kỳ vọng phụ thuộc e dùng E_BALL của engine và `cushionRestitution` của bàn đang đo.
 
 ## Tóm tắt
 
-ĐẠT: 26 · MỘT PHẦN: 4 · KHÔNG ĐẠT: 1 · CHƯA HỖ TRỢ: 3 (tổng 34)
+ĐẠT: 26 · MỘT PHẦN: 4 · KHÔNG ĐẠT: 1 · CHƯA HỖ TRỢ: 2 (tổng 33)
 
 Không đạt: B5
 Một phần: B4, B6, B8, B10
@@ -36,7 +36,7 @@ Một phần: B4, B6, B8, B10
 | B13 | Truyền xoáy sang bi mục tiêu | bi mục tiêu nhận side spin ngược chiều bi cái | wz bi cái trước chạm=111,0 rad/s; wz bi mục tiêu sau chạm=-2,7 rad/s | **ĐẠT** |  |
 | B14 | Combo / cụm bi thẳng hàng | không chồng bi (khoảng cách ≥ 2R), bảo toàn động lượng | khoảng cách nhỏ nhất=57,150 mm (2R=57,150); động lượng sau chuỗi/ngay sau chạm đầu=1,0000 | **ĐẠT** | So sánh tổng vx ngay sau lần chạm 1 với ngay sau lần chạm 3 (bỏ qua ma sát vải giữa hai lần) |
 | C1 | Squirt | má phải → lệch trái (y<0); \|thường\| > \|LD\| > \|carbon\| | thường=-1,50°; LD=-0,90°; carbon=-0,60° | **ĐẠT** | Góc đo từ vị trí bi sau 0,5 s so với điểm xuất phát |
-| C2 | Swerve (nâng cơ + má phải) | θ=0: không cong; θ>0: cong về phải (+), tăng theo θ | độ lệch ngang so với hướng xuất phát: θ0=-0,00; θ5=66,40; θ15=202,17; θ25=342,25 mm | **ĐẠT** |  |
+| C2 | Swerve (nâng cơ + má phải) | θ=0: không cong; θ>0: cong về phải (+), tăng theo θ | độ lệch ngang so với hướng xuất phát: θ0=-0,00; θ5=67,16; θ15=204,69; θ25=360,80 mm | **ĐẠT** |  |
 | C3 | Trượt cơ (miscue) | tip > giới hạn → 30 % tốc độ, ≤ 3° lệch, không xoáy | miscue=true; tốc độ=30,0 %; lệch=3,00°; \|w\|=0,000 | **ĐẠT** |  |
 | C4 | Khối lượng gậy | gậy nặng → bi nhanh hơn | 539 g: 6319 mm/s; 595 g: 6465 mm/s | **ĐẠT** |  |
 | C5 | Xoáy tối đa hợp lý | R·\|ω\| ≤ 2,5·v·b (b = độ lệch điểm chạm) | R\|ω\|/(2,5·v·b) tại θ=0/5/15°: 0,920 / 0,924 / 0,952 (spinEfficiency=0.92) | **ĐẠT** | Tại θ>0 ω lớn hơn 1/cosθ lần vì xung J được nhân 1/cosθ để giữ nguyên tốc độ ngang |
@@ -47,6 +47,5 @@ Một phần: B4, B6, B8, B10
 | D5 | Lỗ góc: lệch mép lỗ | lệch 0/20 mm vào, 50 mm bị bật ra; đi sát băng vào được | lệch 0: vào; 20: vào; 50: không; sát băng: vào | **ĐẠT** |  |
 | D6 | Lỗ giữa khó hơn khi góc lớn | góc 30° vào; góc 70° bị từ chối | 30°: vào; 70°: không (bắn thẳng vào tâm lỗ) | **ĐẠT** |  |
 | D7 | Lắc miệng lỗ (pocket jaw rattle) | đánh lệch vào má lỗ bị nảy qua lại ≥ 2 lần và bật ra | số lần đập má lỗ=2; vào lỗ=không | **ĐẠT** |  |
-| E1 | Bi nhảy (jump shot), massé mạnh | ngoài phạm vi | không đo | **CHƯA HỖ TRỢ** | Xung theo phương đứng bị bàn hấp thụ; nâng cơ chỉ cho swerve nhẹ (≤30°) |
 | E2 | Bi bẩn / phấn trên bi (kick/skid) | ngoài phạm vi | không đo | **CHƯA HỖ TRỢ** | Ma sát đồng nhất, không có độ bẩn |
 | E3 | Mặt bàn nghiêng, vải mòn theo hướng | ngoài phạm vi | không đo | **CHƯA HỖ TRỢ** | Mặt bàn phẳng, ma sát đẳng hướng |

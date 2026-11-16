@@ -465,7 +465,6 @@ function firstCushion(setup) {
 }
 
 /* ------------------------------------------------------------------ E. outside the model */
-add('E1', 'Bi nhảy (jump shot), massé mạnh', 'ngoài phạm vi', 'không đo', NA, 'Xung theo phương đứng bị bàn hấp thụ; nâng cơ chỉ cho swerve nhẹ (≤30°)');
 add('E2', 'Bi bẩn / phấn trên bi (kick/skid)', 'ngoài phạm vi', 'không đo', NA, 'Ma sát đồng nhất, không có độ bẩn');
 add('E3', 'Mặt bàn nghiêng, vải mòn theo hướng', 'ngoài phạm vi', 'không đo', NA, 'Mặt bàn phẳng, ma sát đẳng hướng');
 // E4 (bi lắc trong miệng lỗ) đã được hỗ trợ từ mô hình má lỗ vát và hố rơi.

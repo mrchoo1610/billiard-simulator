@@ -145,7 +145,7 @@ export function firstHit(origin, dir, balls, R, ignoreIds = [0]) {
 }
 
 const RAIL_NOSE_H = 36;
-const RAIL_TOP_H = 46;
+export const RAIL_TOP_H = 46;
 const RAIL_BEVEL_W = 36;
 export const RAIL_MAX_ELEVATION_DEG = 72;
 

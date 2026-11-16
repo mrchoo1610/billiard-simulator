@@ -91,9 +91,10 @@ test('stepPower clamps to 0..1 and rounds to 1%', () => {
   near(stepPower(0.1 + 0.2, 0.01), 0.31); // float noise
 });
 
-test('stepElevation clamps to 0..30', () => {
+test('stepElevation clamps to 0..72', () => {
   assert.equal(stepElevation(5, 1), 6);
-  assert.equal(stepElevation(30, 1), 30);
+  assert.equal(stepElevation(30, 1), 31);
+  assert.equal(stepElevation(72, 1), 72);
   assert.equal(stepElevation(0, -1), 0);
 });
 

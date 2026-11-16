@@ -10,6 +10,7 @@
 // Table/cloth/cushion constants come from a TableProfile, cue constants from a CueProfile (see equipment.js).
 import { norm, clamp, rotate, rad, deg } from './vec.js';
 import { R, buildTable } from './table.js';
+import { RAIL_TOP_H } from './geometry.js';
 import { defaultTable, defaultCue, stickSpeed, ballSpeed, squirtDeg } from './equipment.js';
 
 export const G = 9810;
@@ -28,6 +29,10 @@ export const MISCUE_SPEED_FACTOR = 0.3;
 export const MISCUE_MAX_DEG = 3;
 export const DEFAULT_ELEVATION_DEG = 5; // UI / drill default; the engine itself defaults to a level cue (0) when a shot omits it
 export const MAX_ELEVATION_DEG = 72;
+export const TABLE_BOUNCE_E = 0.5; // slate/cloth restitution for a ball driven into the table (cue jump, landing)
+export const HOP_ABSORB = 600; // mm/s of upward speed swallowed by cloth + tip dwell (small hops never happen)
+const OUTSIDE_LIMIT = 150; // mm beyond a cushion line (deeper than any pocket well): the ball has left the table
+export const POT_MAX_Z = 20; // mm: a ball higher than this above the cloth cannot drop into a pocket
 
 /* ------------------------------------------------------------------ quaternions (pure helpers) */
 
@@ -91,6 +96,7 @@ export function createBall(id, x = 0, y = 0) {
     w: { x: 0, y: 0, z: 0 },
     q: quatIdentity(),
     potted: false,
+    offTable: false,
     sliding: false,
     path: [],
   });
@@ -108,6 +114,7 @@ export function cloneBall(b) {
     w,
     q: b.q ? { w: b.q.w, x: b.q.x, y: b.q.y, z: b.q.z } : quatIdentity(),
     potted: !!b.potted,
+    offTable: !!b.offTable,
     sliding: false,
     path: [],
   });
@@ -123,10 +130,11 @@ const cross3 = (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, 
  * Cue-ball launch from a tip hit (pure; does not touch any ball).
  *  - tip = {x,y}: contact point offset from the ball centre as a fraction of R (unit circle) in the plane
  *    perpendicular to the cue. x>0 right english, y>0 top (follow), y<0 draw.
- *  - elevationDeg: butt-up angle of the cue (0 = level). The cue travels downwards, the vertical impulse is
- *    absorbed by the table; only the horizontal part launches the ball. Elevation + side english makes the
+ *  - elevationDeg: butt-up angle of the cue (0 = level). The cue drives the ball into the slate; the slate returns
+ *    part of the vertical impulse (hop vz) and only the horizontal part J*cos(theta) moves the ball forward. Elevation + side english makes the
  *    spin axis tilt out of the vertical => lateral slip => swerve.
- *  - ball speed v = (1 + e_tip) * m_cue / (m_cue + m_ball) * v_stick  (horizontal speed, independent of elevation)
+ *  - J = (1 + e_tip) * m_cue / (m_cue + m_ball) * v_stick (impulse per unit ball mass along the cue);
+ *    horizontal speed = J*cos(theta); hop vz = max(0, TABLE_BOUNCE_E*J*sin(theta) - HOP_ABSORB)
  *  - angular velocity w = (p x J) / I with I = 2/5 m R^2, scaled by spinEfficiency
  *  - squirt: launch direction = aimDir rotated by -squirtDegPerFullSide * tip.x degrees (right english -> left)
  *  - miscue: |tip| > miscueLimit  =>  30 % speed, random +-3 deg, no spin
@@ -154,6 +162,7 @@ export function computeLaunch(aimDir, power, tip = { x: 0, y: 0 }, cue = default
       side: 0,
       miscue: true,
       squirtDeg: ang,
+      vz: 0,
       stick,
       elevationDeg: elev,
     };
@@ -173,16 +182,12 @@ export function computeLaunch(aimDir, power, tip = { x: 0, y: 0 }, cue = default
     y: R * (tx * rt.y + ty * up.y - depth * dc.y),
     z: R * (tx * rt.z + ty * up.z - depth * dc.z),
   };
-  const jm = full / c; // impulse per unit mass so that the horizontal speed is `full`
+  const jm = full; // impulse per unit mass along the cue
   const pxj = cross3(p, { x: dc.x * jm, y: dc.y * jm, z: dc.z * jm });
   const k = cue.spinEfficiency / (0.4 * R * R);
   const w = { x: pxj.x * k + 0, y: pxj.y * k + 0, z: pxj.z * k + 0 };
-  let vz = 0;
-  let speed = full;
-  if (elev >= 30 && power >= 0.52 && ty >= -0.35) {
-    vz = full * Math.sin(th) * 0.52;
-    speed = full * Math.cos(th) * 0.72;
-  }
+  const speed = full * c;
+  const vz = Math.max(0, TABLE_BOUNCE_E * full * s - HOP_ABSORB);
   return {
     dir,
     speed,
@@ -241,6 +246,7 @@ export class Sim {
       firstContactObjPos: null, // object-ball centre at the first contact
       potted: [],
       drops: [],
+      offTable: [],
       cushionHits: [],
       contacts: [],
       miscue: false,
@@ -325,21 +331,46 @@ export class Sim {
     }
   }
 
+  /** Ball meets the slate with downward speed `vin`: restitution bounce + Coulomb impact friction on the contact slip. */
+  _land(b, vin) {
+    const e = TABLE_BOUNCE_E;
+    const vb = e * vin;
+    b.vz = vb > 150 ? vb : 0;
+    if (vin <= 0) return;
+    const v = b.vel;
+    const w = b.w;
+    const ux = v.x + R * w.y;
+    const uy = v.y - R * w.x;
+    const ul = Math.hypot(ux, uy);
+    if (ul < 1e-6) return;
+    const dvm = Math.min(this.muSlide * (1 + e) * vin, (2 / 7) * ul);
+    const dvx = (-ux / ul) * dvm;
+    const dvy = (-uy / ul) * dvm;
+    v.x += dvx;
+    v.y += dvy;
+    w.x += (-2.5 * dvy) / R;
+    w.y += (2.5 * dvx) / R;
+  }
+
   _move(b, dt) {
     if ((b.vz && b.vz !== 0) || (b.z && b.z > 0)) {
       b.z = (b.z || 0) + b.vz * dt;
       b.vz -= G * dt;
       if (b.z <= 0) {
         b.z = 0;
-        if (b.vz < -250) {
-          b.vz = -b.vz * 0.28;
-        } else {
-          b.vz = 0;
-        }
+        this._land(b, b.vz < 0 ? -b.vz : 0);
       }
     }
     const v = b.vel;
     const w = b.w;
+    if (b.z > 0) {
+      // airborne: no contact with the cloth, so no friction - velocity and spin are carried unchanged
+      b.sliding = false;
+      b.pos.x += v.x * dt;
+      b.pos.y += v.y * dt;
+      if (this.orient) integrateQuat(b.q, w, dt);
+      return;
+    }
     if (v.x === 0 && v.y === 0 && w.x === 0 && w.y === 0) {
       w.z = 0;
       b.sliding = false;
@@ -403,7 +434,7 @@ export class Sim {
       for (let j = i + 1; j < n; j++) {
         const b = balls[j];
         if (b.potted) continue;
-        if (a.vel.x === 0 && a.vel.y === 0 && b.vel.x === 0 && b.vel.y === 0) continue;
+        if (a.vel.x === 0 && a.vel.y === 0 && b.vel.x === 0 && b.vel.y === 0 && !a.vz && !b.vz) continue;
         let dx = b.pos.x - a.pos.x;
         let dy = b.pos.y - a.pos.y;
         const az = a.z || 0;
@@ -411,6 +442,7 @@ export class Sim {
         const dz = bz - az;
         const d2_3d = dx * dx + dy * dy + dz * dz;
         if (d2_3d >= min2) continue;
+        const air = az > 0 || bz > 0 || !!a.vz || !!b.vz;
         // Sub-step impact time: back both balls up to the exact moment their centres were 2R apart,
         // resolve the collision there, then advance with the new velocities (removes the +-v*dt contact jitter).
         let tau = 0;
@@ -432,6 +464,17 @@ export class Sim {
             dx = b.pos.x - a.pos.x;
             dy = b.pos.y - a.pos.y;
           }
+        }
+        if (air) {
+          this._collide3d(a, b);
+          if (tau > 0) {
+            for (const q of [a, b]) {
+              q.pos.x += q.vel.x * tau;
+              q.pos.y += q.vel.y * tau;
+              if (q.z || q.vz) q.z = Math.max(0, (q.z || 0) + (q.vz || 0) * tau);
+            }
+          }
+          continue;
         }
         let d = Math.sqrt(dx * dx + dy * dy);
         if (d < 1e-9) {
@@ -530,6 +573,62 @@ export class Sim {
     }
   }
 
+  /** Ball-ball contact when at least one ball is airborne / moving vertically: frictionless 3D normal impulse. */
+  _collide3d(a, b) {
+    let dx = b.pos.x - a.pos.x;
+    let dy = b.pos.y - a.pos.y;
+    let dz = (b.z || 0) - (a.z || 0);
+    let d = Math.sqrt(dx * dx + dy * dy + dz * dz);
+    if (d < 1e-9) {
+      dx = 1;
+      dy = 0;
+      dz = 0;
+      d = 1;
+    }
+    const nx = dx / d;
+    const ny = dy / d;
+    const nz = dz / d;
+    const avz = a.vz || 0;
+    const bvz = b.vz || 0;
+    const vn = (a.vel.x - b.vel.x) * nx + (a.vel.y - b.vel.y) * ny + (avz - bvz) * nz;
+    if (vn > 0) {
+      const jn = ((1 + E_BALL) / 2) * vn;
+      a.vel.x -= jn * nx;
+      a.vel.y -= jn * ny;
+      a.vz = avz - jn * nz;
+      b.vel.x += jn * nx;
+      b.vel.y += jn * ny;
+      b.vz = bvz + jn * nz;
+      const ev = this.events;
+      if (ev.contacts.length < 60) {
+        ev.contacts.push({
+          a: a.id,
+          b: b.id,
+          time: this.time,
+          pos: { x: (a.pos.x + b.pos.x) / 2, y: (a.pos.y + b.pos.y) / 2 },
+          speed: vn,
+        });
+      }
+      if (ev.firstContact === null && (a.id === CUE_ID || b.id === CUE_ID)) {
+        const cueB = a.id === CUE_ID ? a : b;
+        const objB = a.id === CUE_ID ? b : a;
+        ev.firstContact = objB.id;
+        ev.firstContactPos = { x: cueB.pos.x, y: cueB.pos.y };
+        ev.firstContactObjPos = { x: objB.pos.x, y: objB.pos.y };
+      }
+    }
+    const overlap = 2 * R - d;
+    if (overlap > 0) {
+      const push = overlap / 2 + 1e-6;
+      a.pos.x -= nx * push;
+      a.pos.y -= ny * push;
+      a.z = Math.max(0, (a.z || 0) - nz * push);
+      b.pos.x += nx * push;
+      b.pos.y += ny * push;
+      b.z = Math.max(0, (b.z || 0) + nz * push);
+    }
+  }
+
   _pot(b, pk) {
     this.events.drops.push({
       id: b.id,
@@ -559,10 +658,28 @@ export class Sim {
     const p = b.pos;
     const v = b.vel;
     const sp = Math.hypot(v.x, v.y);
+    const z = b.z || 0;
+    // Safety net: a low hop through a pocket opening that lands past the well must not roll on outside the table.
+    for (const w of this.geo.WALLS) {
+      if (w.depth(p) < -OUTSIDE_LIMIT) {
+        this._offTable(b);
+        return;
+      }
+    }
+    if (z >= RAIL_TOP_H) {
+      // above the rail: cushions and jaws are ignored; a ball whose centre leaves the playing rectangle is off the table
+      for (const w of this.geo.WALLS) {
+        if (w.depth(p) < 0) {
+          this._offTable(b);
+          return;
+        }
+      }
+      return;
+    }
     // Drop capture inside the pocket well: core well always drops; outer rim requires moving inward
     // (glancing or fast rattling balls ride across the slate shelf to the opposite jaw).
     const speedTighten = 1 - 0.12 * clamp((sp - 1000) / 6000, 0, 1);
-    for (const pk of this.geo.POCKETS) {
+    if (z < POT_MAX_Z) for (const pk of this.geo.POCKETS) {
       const dx = p.x - pk.cx;
       const dy = p.y - pk.cy;
       const d2 = dx * dx + dy * dy;
@@ -591,6 +708,17 @@ export class Sim {
       else if (d < 0) this._fixDepth(b, w);
     }
     this._jaws(b);
+  }
+
+  _offTable(b) {
+    b.potted = true;
+    b.offTable = true;
+    b.vel.x = b.vel.y = 0;
+    b.vz = 0;
+    b.w.x = b.w.y = b.w.z = 0;
+    b.sliding = false;
+    this.events.potted.push(b.id);
+    this.events.offTable.push(b.id);
   }
 
   /** Angled pocket jaws (including rounded cushion knuckles at their tips) cause off-centre rattle. */
