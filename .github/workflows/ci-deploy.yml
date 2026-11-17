@@ -2,7 +2,7 @@ name: CI and deploy
 
 on:
   push:
-    branches: [main, chore/deploy-self-hosted]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -46,7 +46,7 @@ jobs:
       - name: Smoke test the container
         run: |
           docker run -d --name smoke -p 127.0.0.1:28787:28787 "${{ steps.meta.outputs.image }}"
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
             if [ "$(curl -fsS --max-time 5 http://127.0.0.1:28787/healthz || true)" = "ok" ]; then
               echo "container healthy"
               docker rm -f smoke
@@ -59,7 +59,7 @@ jobs:
           exit 1
 
       - name: Push to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -71,7 +71,8 @@ jobs:
     # Runs on the self-hosted Linux runner (server).
     # Builds and pushes image first, then this job pulls the image directly on the host and restarts.
     needs: image
-    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED != 'false'
+    # production deploys only from main (never from another branch or a pull request)
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED != 'false'
     runs-on: [self-hosted, Linux]
     environment: production
     permissions:
@@ -101,10 +102,14 @@ jobs:
             cp docker-compose.yml "$DEPLOY_DIR/docker-compose.yml"
             cd "$DEPLOY_DIR"
           else
-            echo "Using workspace directory $(pwd) for deploy"
-            if [ ! -f .env ]; then
-              cp .env.example .env
-            fi
+            # The checkout workspace is wiped by actions/checkout on every run, so keep the deploy folder
+            # (.env, current-image.txt) in the runner user's home instead.
+            FALLBACK_DIR="${HOME}/mimepool-deploy"
+            echo "$DEPLOY_DIR is missing or not writable; deploying from $FALLBACK_DIR"
+            mkdir -p "$FALLBACK_DIR"
+            cp docker-compose.yml "$FALLBACK_DIR/docker-compose.yml"
+            [ -f "$FALLBACK_DIR/.env" ] || cp .env.example "$FALLBACK_DIR/.env"
+            cd "$FALLBACK_DIR"
           fi
 
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
@@ -125,7 +130,7 @@ jobs:
             CHECK_URL="http://127.0.0.1:${PORT_VAL}/healthz"
           fi
           echo "Checking container health at $CHECK_URL..."
-          for i in 1 2 3 4 5 6; do
+          for _ in 1 2 3 4 5 6; do
             if [ "$(curl -fsS --max-time 10 "$CHECK_URL" || true)" = "ok" ]; then
               echo "Container is healthy!"
               exit 0
