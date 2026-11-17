@@ -1,0 +1,142 @@
+name: CI and deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+  image:
+    # Build the Docker image on every run (so a broken Dockerfile fails a PR); push it to GHCR only from main.
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Image name
+        id: meta
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY,,}"
+          echo "repo=${repo}" >> "$GITHUB_OUTPUT"
+          echo "image=${repo}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: docker build -t "${{ steps.meta.outputs.image }}" -t "${{ steps.meta.outputs.repo }}:latest" .
+
+      - name: Smoke test the container
+        run: |
+          docker run -d --name smoke -p 127.0.0.1:28787:28787 "${{ steps.meta.outputs.image }}"
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if [ "$(curl -fsS --max-time 5 http://127.0.0.1:28787/healthz || true)" = "ok" ]; then
+              echo "container healthy"
+              docker rm -f smoke
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs smoke
+          docker rm -f smoke
+          exit 1
+
+      - name: Push to GHCR
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker push "${{ steps.meta.outputs.image }}"
+          docker push "${{ steps.meta.outputs.repo }}:latest"
+
+  deploy:
+    # Runs only on main, and only once the repository variable DEPLOY_ENABLED is set to "true"
+    # (Settings -> Secrets and variables -> Actions -> Variables). See docs/deploy-vps.md.
+    needs: image
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    env:
+      IMAGE: ${{ needs.image.outputs.image }}
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
+      DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
+      DEPLOY_URL: ${{ vars.DEPLOY_URL }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Upload compose file
+        run: |
+          scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" -o StrictHostKeyChecking=yes \
+            docker-compose.yml "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/docker-compose.yml"
+
+      - name: Pull image and restart
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The job token is piped over SSH for this one pull and the server is logged out again afterwards.
+        # The server's own .env keeps PORT / ALLOWED_ORIGINS / TUNNEL_TOKEN; IMAGE is set per deploy here.
+        run: |
+          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" -o StrictHostKeyChecking=yes \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "
+              set -e
+              cd '${DEPLOY_PATH}'
+              docker login ghcr.io -u '${GITHUB_ACTOR}' --password-stdin
+              export IMAGE='${IMAGE}'
+              docker compose pull app
+              docker compose up -d --no-build app
+              docker logout ghcr.io
+              printf '%s\n' '${IMAGE}' > current-image.txt
+              docker image prune -f
+            "
+
+      - name: Health check
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if [ "$(curl -fsS --max-time 10 "${DEPLOY_URL%/}/healthz" || true)" = "ok" ]; then
+              echo "healthy"
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "health check failed: ${DEPLOY_URL%/}/healthz" >&2
+          exit 1
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

@@ -2,24 +2,28 @@
 <html lang="vi">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0b6e4f">
-  <meta name="description" content="Ứng dụng tập luyện bida 9 bi: ngắm bi ma, góc cắt, độ dày, dự đoán đường đi.">
-  <title>Bida 9 bi – Tập luyện</title>
+  <!-- Usage analytics id: left empty in the repository. The Node server fills it in from the GA_MEASUREMENT_ID
+       environment variable when it serves this page (see server/index.mjs). Empty = analytics off. -->
+  <meta name="ga-measurement-id" content="">
+  <meta name="description" content="MimePool: bida 9 bi và 8 bi – đấu 1 vs 1 online, đấu với Bot và luyện tập (bi ma, góc cắt, độ dày, dự đoán đường đi).">
+  <title>MimePool – Bida 9 bi &amp; 8 bi online</title>
   <link rel="manifest" href="assets/manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/style.css?v=39">
+  <link rel="stylesheet" href="assets/style.css?v=42">
 </head>
 <body data-app="practice" data-mode="free">
   <header class="top">
-    <h1>Bida 9 bi</h1>
+    <h1>MimePool</h1>
     <button type="button" id="equipChip" class="equip-chip" aria-haspopup="dialog" aria-controls="sheet" title="Chọn bàn và gậy">
       <span id="equipChipText">Bàn · Gậy</span>
     </button>
     <nav class="main-modes" id="mainModes" aria-label="Phân khu chơi">
       <button type="button" data-app="bot">Bắn với Bot</button>
+      <button type="button" data-app="pvp" title="Đấu 1 vs 1 với người thật qua mạng (hai thiết bị)">1 vs 1</button>
       <button type="button" data-app="hero" title="Đấu đối kháng với Bot Hero (AI Tự học & Tuyệt kỹ)">🌟 Đấu Hero</button>
-      <button type="button" data-app="bvb">Đấu 2 Bot</button>
+      <button type="button" data-app="bvb" class="dev-only">Đấu 2 Bot</button>
       <button type="button" data-app="practice" class="active">Luyện tập</button>
     </nav>
     <nav class="tabs" id="tabs" aria-label="Chế độ luyện tập">
@@ -152,6 +156,11 @@
           </div>
         </div>
         <p class="drill-prompt" id="botStatusText">Đặt bi cái sau vạch đầu bàn và phá bi.</p>
+        <div class="pvp-controls" id="pvpControls" hidden>
+          <span class="pill pvp-conn is-ok" id="pvpConnPill" role="status" aria-live="polite">Đã kết nối</span>
+          <button type="button" id="btnPvpResign" class="btn small" title="Chịu thua trận này">Xin thua</button>
+          <button type="button" id="btnPvpLeave" class="btn small" title="Rời phòng và về sảnh">Rời phòng</button>
+        </div>
         <div class="bot-bvb-controls" id="bvbControls" hidden>
           <button type="button" id="btnBvbPause" class="btn small" title="Tạm dừng hoặc tiếp tục trận đấu">⏸ Tạm dừng</button>
           <button type="button" id="btnBvbSpeed" class="btn small" title="Đổi tốc độ suy nghĩ">⚡ 1x</button>
@@ -342,7 +351,7 @@
     <div class="lobby-backdrop"></div>
     <div class="lobby-dialog" role="dialog" aria-modal="true" aria-labelledby="lobbyTitle">
       <div class="lobby-header">
-        <span class="lobby-kicker">Bida 9 Bi · Mô phỏng vật lý thực</span>
+        <span class="lobby-kicker">MimePool · Bida mô phỏng vật lý thực</span>
         <h2 id="lobbyTitle">Chọn chế độ chơi</h2>
         <p>Đấu 9 bi đối kháng với Bot AI hoặc vào phòng luyện tập tự do &amp; kỹ năng.</p>
       </div>
@@ -382,7 +391,47 @@
           <button type="button" id="btnStartBot" class="btn primary lobby-cta">Vào trận với Bot</button>
         </article>
 
-        <article class="lobby-card lobby-card-bvb">
+        <article class="lobby-card lobby-card-pvp" id="lobbyPvp">
+          <div class="lobby-icon" aria-hidden="true">🧑‍🤝‍🧑</div>
+          <h3>1 vs 1 Online</h3>
+          <p>Đấu với người thật trên hai thiết bị: tạo phòng rồi gửi mã hoặc liên kết cho bạn bè.</p>
+          <label class="lobby-field" for="pvpName">
+            <span>Tên của bạn</span>
+            <input type="text" id="pvpName" maxlength="15" placeholder="Người chơi" autocomplete="nickname">
+          </label>
+          <div id="pvpSetup">
+            <div class="lobby-game" id="lobbyPvpGame" role="group" aria-label="Chọn thể thức đấu online">
+              <button type="button" data-game="9ball" class="active">9 Bi</button>
+              <button type="button" data-game="8ball">8 Bi</button>
+            </div>
+            <div class="lobby-race-row">
+              <label for="lobbyPvpRace">Mục tiêu thắng:</label>
+              <select id="lobbyPvpRace" class="lobby-race-select" aria-label="Mục tiêu số ván thắng online">
+                <option value="1">Chạm 1</option>
+                <option value="3">Chạm 3</option>
+                <option value="5" selected>Chạm 5</option>
+                <option value="7">Chạm 7</option>
+                <option value="9">Chạm 9</option>
+                <option value="11">Chạm 11</option>
+              </select>
+            </div>
+            <button type="button" id="btnPvpCreate" class="btn primary lobby-cta">Tạo phòng</button>
+            <div class="pvp-join-row">
+              <input type="text" id="pvpCode" maxlength="5" placeholder="Mã phòng" aria-label="Mã phòng" autocomplete="off" autocapitalize="characters" spellcheck="false" inputmode="text">
+              <button type="button" id="btnPvpJoin" class="btn">Vào phòng</button>
+            </div>
+          </div>
+          <div id="pvpWaiting" class="pvp-waiting" hidden>
+            <div class="pvp-code" id="pvpCodeBig" aria-label="Mã phòng" title="Chạm để sao chép mã phòng"></div>
+            <button type="button" id="btnPvpCopyCode" class="btn primary lobby-cta">Sao chép mã phòng</button>
+            <button type="button" id="btnPvpCopy" class="btn lobby-cta">Sao chép liên kết</button>
+            <p class="pvp-wait-text" role="status">Đang chờ đối thủ…</p>
+            <button type="button" id="btnPvpCancel" class="btn lobby-cta">Hủy</button>
+          </div>
+          <p class="pvp-error" id="pvpError" role="alert" hidden></p>
+        </article>
+
+        <article class="lobby-card lobby-card-bvb dev-only">
           <div class="lobby-icon" aria-hidden="true">🤖⚔️🤖</div>
           <h3>Đấu 2 Bot</h3>
           <p>Hai Bot AI so tài tự động. Tùy chỉnh tên và độ khó cho từng Bot.</p>
@@ -482,6 +531,7 @@
       <div class="match-win-trophy" aria-hidden="true">🏆</div>
       <h2 id="matchWinTitle">Chiến Thắng Chung Cuộc!</h2>
       <p id="matchWinDesc" class="match-win-desc">Người chơi đã chạm mốc ván thắng trước.</p>
+      <p id="matchWinWait" class="match-win-wait" role="status" hidden></p>
       <div class="match-win-score">
         <div class="win-score-col">
           <span class="win-name" id="winName1">Bạn</span>
@@ -501,6 +551,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/app.js?v=29"></script>
+  <script type="module" src="src/app.js?v=37"></script>
 </body>
 </html>

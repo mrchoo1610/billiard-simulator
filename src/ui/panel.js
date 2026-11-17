@@ -162,6 +162,10 @@ export function createPanel(h) {
 
   // Match Win Celebration controls
   $('btnMatchWinRematch')?.addEventListener('click', () => {
+    if (winPvp) {
+      h.onPvpRematch?.(); // online: the modal stays open until both players agree
+      return;
+    }
     setMatchWin(false);
     h.onNewMatch?.();
   });
@@ -170,9 +174,58 @@ export function createPanel(h) {
     h.onKeepPlaying?.();
   });
   $('btnMatchWinLobby')?.addEventListener('click', () => {
+    if (winPvp) {
+      setMatchWin(false);
+      h.onPvpLeave?.({ confirm: false });
+      return;
+    }
     setMatchWin(false);
     setLobbyOpen(true);
   });
+
+  // 1 vs 1 online: lobby card + in-match controls
+  let pvpGame = '9ball';
+  for (const b of document.querySelectorAll('#lobbyPvpGame button')) {
+    b.addEventListener('click', () => {
+      pvpGame = b.dataset.game;
+      for (const x of document.querySelectorAll('#lobbyPvpGame button')) x.classList.toggle('active', x.dataset.game === pvpGame);
+    });
+  }
+  const NAME_KEY = 'bida9-name';
+  if ($('pvpName')) {
+    try {
+      $('pvpName').value = localStorage.getItem(NAME_KEY) || '';
+    } catch (e) {
+      /* ignore */
+    }
+  }
+  const readPvpName = () => {
+    const v = ($('pvpName')?.value || '').trim();
+    try {
+      if (v) localStorage.setItem(NAME_KEY, v);
+    } catch (e) {
+      /* ignore */
+    }
+    return v;
+  };
+  const submitJoin = () => h.onPvpJoin?.({ name: readPvpName(), code: ($('pvpCode')?.value || '').trim().toUpperCase() });
+  $('btnPvpCreate')?.addEventListener('click', () => {
+    h.onPvpCreate?.({ name: readPvpName(), game: pvpGame, raceTo: parseInt($('lobbyPvpRace')?.value || '5', 10) });
+  });
+  $('btnPvpJoin')?.addEventListener('click', submitJoin);
+  $('pvpCode')?.addEventListener('input', (e) => {
+    e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    setPvpError('');
+  });
+  $('pvpCode')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submitJoin();
+  });
+  $('btnPvpCopy')?.addEventListener('click', () => h.onPvpCopy?.());
+  $('btnPvpCopyCode')?.addEventListener('click', () => h.onPvpCopyCode?.());
+  $('pvpCodeBig')?.addEventListener('click', () => h.onPvpCopyCode?.());
+  $('btnPvpCancel')?.addEventListener('click', () => h.onPvpCancel?.());
+  $('btnPvpResign')?.addEventListener('click', () => h.onPvpResign?.());
+  $('btnPvpLeave')?.addEventListener('click', () => h.onPvpLeave?.({ confirm: true }));
 
   // BvB in-game controls
   $('btnBvbPause')?.addEventListener('click', () => h.onBvbPause?.());
@@ -182,7 +235,7 @@ export function createPanel(h) {
 
   const openRename = () => {
     const modal = $('renameModal');
-    if (!modal) return;
+    if (!modal || document.body.dataset.app === 'pvp') return;
     if ($('renameInput1')) $('renameInput1').value = currentBot1Name;
     if ($('renameInput2')) $('renameInput2').value = currentBot2Name;
     modal.hidden = false;
@@ -352,6 +405,14 @@ export function createPanel(h) {
     for (const b of document.querySelectorAll('#mainModes button')) {
       b.classList.toggle('active', b.dataset.app === appMode);
     }
+    const act = document.querySelector('#mainModes button.active');
+    if (act && act.scrollIntoView) {
+      try {
+        act.scrollIntoView({ inline: 'center', block: 'nearest' });
+      } catch (e) {
+        /* ignore */
+      }
+    }
   }
 
   function setLobbyOpen(open) {
@@ -359,10 +420,27 @@ export function createPanel(h) {
     if (el) el.hidden = !open;
   }
 
+  let winPvp = false;
+  function setMatchWinWait(text, disableRematch = false) {
+    const w = $('matchWinWait');
+    if (w) {
+      w.textContent = text || '';
+      w.hidden = !text;
+    }
+    const rb = $('btnMatchWinRematch');
+    if (rb) rb.disabled = !!disableRematch;
+  }
+
   function setMatchWin(show, details = {}) {
     const el = $('matchWinModal');
     if (!el) return;
     el.hidden = !show;
+    winPvp = show ? !!details.pvp : false;
+    const keep = $('btnMatchWinKeepPlaying');
+    if (keep) keep.hidden = winPvp;
+    const rb = $('btnMatchWinRematch');
+    if (rb) rb.textContent = winPvp ? 'Chơi lại' : 'Chơi lại trận mới';
+    setMatchWinWait('', false);
     if (show) {
       if (details.title && $('matchWinTitle')) $('matchWinTitle').textContent = details.title;
       if (details.desc && $('matchWinDesc')) $('matchWinDesc').textContent = details.desc;
@@ -394,6 +472,7 @@ export function createPanel(h) {
     statusText,
     isFoul,
     thinking,
+    myWho = 'player',
   }) {
     currentBot1Name = bot1Name;
     currentBot2Name = bot2Name;
@@ -405,6 +484,7 @@ export function createPanel(h) {
     if ($('botRacePill')) $('botRacePill').textContent = raceTo > 0 ? `Chạm ${raceTo}` : 'Tự do';
 
     const isBvb = matchType === 'bvb';
+    const isPvp = matchType === 'pvp';
     const gameLabel = (BOT_GAMES[game] || BOT_GAMES['9ball']).label;
     const hero = loadHeroProfile();
     const heroLabel = (d, name) => {
@@ -415,9 +495,26 @@ export function createPanel(h) {
     };
 
     if ($('bvbControls')) $('bvbControls').hidden = !isBvb;
-    if ($('botDiffWrap')) $('botDiffWrap').hidden = isBvb;
+    if ($('botDiffWrap')) $('botDiffWrap').hidden = isBvb || isPvp;
 
-    if (isBvb) {
+    if (isPvp) {
+      if ($('botName1')) {
+        $('botName1').textContent = myWho === 'player' ? `${bot1Name} (Bạn)` : bot1Name;
+        $('botName1').classList.remove('editable-name');
+      }
+      if ($('botName2')) {
+        $('botName2').textContent = myWho === 'bot' ? `${bot2Name} (Bạn)` : bot2Name;
+        $('botName2').classList.remove('editable-name');
+      }
+      $('botName1')?.parentElement?.classList.toggle('is-shooting', turn === 'player');
+      $('botName2')?.parentElement?.classList.toggle('is-shooting', turn === 'bot');
+      const tp = $('botTurnPill');
+      if (tp) {
+        const mine = turn === myWho;
+        tp.textContent = mine ? 'Lượt bạn' : `Lượt ${turn === 'player' ? bot1Name : bot2Name}`;
+        tp.className = `pill ${mine ? (isFoul ? 'is-foul' : '') : 'is-bot-turn'}`.trim();
+      }
+    } else if (isBvb) {
       const d1 = BOT_DIFFICULTIES[bot1Diff] || BOT_DIFFICULTIES.hard;
       const d2 = BOT_DIFFICULTIES[bot2Diff] || BOT_DIFFICULTIES.pro;
       if ($('botName1')) {
@@ -563,9 +660,61 @@ export function createPanel(h) {
     }
   }
 
+  function setPvpError(text) {
+    const el = $('pvpError');
+    if (!el) return;
+    el.textContent = text || '';
+    el.hidden = !text;
+  }
+
+  /** phase: 'idle' | 'connecting' | 'waiting'. */
+  function setPvpLobby({ phase = 'idle', code = '', error = '' } = {}) {
+    const setup = $('pvpSetup');
+    const waiting = $('pvpWaiting');
+    if (setup) setup.hidden = phase === 'waiting';
+    if (waiting) waiting.hidden = phase !== 'waiting';
+    if ($('pvpCodeBig')) $('pvpCodeBig').textContent = code || '';
+    const busy = phase === 'connecting';
+    for (const id of ['btnPvpCreate', 'btnPvpJoin']) {
+      if ($(id)) $(id).disabled = busy;
+    }
+    if ($('btnPvpCreate')) $('btnPvpCreate').textContent = busy ? 'Đang kết nối…' : 'Tạo phòng';
+    setPvpError(error);
+  }
+
+  /** Fill the room code from an invite link and put the cursor on the name field. */
+  function focusPvpLobby(code) {
+    if (code && $('pvpCode')) $('pvpCode').value = code;
+    const card = $('lobbyPvp');
+    if (card && card.scrollIntoView) {
+      try {
+        card.scrollIntoView({ block: 'nearest' });
+      } catch (e) {
+        /* ignore */
+      }
+    }
+    $('pvpName')?.focus();
+  }
+
+  /** kind: 'ok' | 'warn' | 'bad'. */
+  function setPvpHud({ visible, text = '', kind = 'ok' }) {
+    const row = $('pvpControls');
+    if (row) row.hidden = !visible;
+    const pill = $('pvpConnPill');
+    if (pill) {
+      pill.textContent = text;
+      pill.className = `pill pvp-conn is-${kind}`;
+    }
+  }
+
   return {
     spinPad,
     toast,
+    setPvpLobby,
+    setPvpError,
+    focusPvpLobby,
+    setPvpHud,
+    setMatchWinWait,
     refreshTray,
     setPottedBalls,
     updateInfo,

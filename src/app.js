@@ -2,7 +2,7 @@
 import { R, buildTable } from './core/table.js';
 import { computeShot, bestPocket, isPathBlocked, firstHit, effectiveCueElevationDeg } from './core/geometry.js';
 import { createBall, createSim, simulate, computeLaunch, DEFAULT_ELEVATION_DEG } from './core/physics.js';
-import { physicsEquipmentKey } from './core/equipment.js';
+import { physicsEquipmentKey, tablePreset, cuePreset } from './core/equipment.js';
 import { solveAim } from './core/aim-solver.js';
 import { createRenderer, BALL_COLORS } from './ui/render.js';
 import { createInput, placeBall } from './ui/input.js';
@@ -29,6 +29,45 @@ import { rotate, rad, deg, dist, clamp } from './core/vec.js';
 import { CAMERA_MODES, CAMERA_MODE_LABEL, nextCameraMode } from './ui/view3d-math.js'; // pure; three.js itself is only fetched on first 3D open
 import { createDropAnim, stepDropAnim } from './ui/drop-anim.js';
 import { createSoundEngine } from './ui/sound.js';
+import { createNetClient, loadSession, SESSION_KEY } from './net/client.js';
+import { serverUrl } from './net/config.js';
+import { ROOM_CODE_RE, sanitizeName } from './net/protocol.js';
+import { isDevBuild } from './core/build.js';
+import { createAnalytics, readMeasurementId } from './features/analytics.js';
+import { mulberry32, newSeed, packBalls, unpackBalls, packMatch, applyMatch, seatToWho, otherWho, parseRoomHash, roomLink, createShotGate } from './features/pvp.js';
+
+// develop-only UI (class .dev-only) stays hidden unless this is a develop build, see core/build.js
+const DEV_BUILD = isDevBuild(location, (() => { try { return localStorage; } catch (e) { return null; } })());
+document.body.dataset.build = DEV_BUILD ? 'dev' : 'release';
+// usage analytics (GA4): release builds only, and only when a measurement id is set in index.html
+const analytics = createAnalytics({ id: readMeasurementId(document), enabled: !DEV_BUILD });
+let matchEndTracked = false;
+const matchParams = () => ({
+  mode: state.bot.matchType === 'pvp' ? 'pvp' : state.bot.matchType === 'bvb' ? 'bvb' : 'bot',
+  game: state.bot.game,
+  race_to: state.bot.raceTo || 0,
+  ...(state.bot.matchType === 'pve' ? { difficulty: state.bot.difficulty } : {}),
+});
+function trackMatchStart() {
+  matchEndTracked = false;
+  analytics.track('match_start', matchParams());
+}
+/** winner: 'player' | 'bot' | 'bot1' | 'bot2'; reported once per match, from this device's point of view. */
+function trackMatchEnd(winner, reason = 'race') {
+  if (matchEndTracked) return;
+  matchEndTracked = true;
+  const type = state.bot.matchType;
+  const p1Won = winner === 'player' || winner === 'bot1';
+  const me = type === 'pvp' && state.pvp ? state.pvp.myWho : 'player';
+  analytics.track('match_end', {
+    ...matchParams(),
+    reason,
+    result: type === 'bvb' ? 'watched' : winner === me ? 'win' : 'lose',
+    score_winner: p1Won ? state.bot.scorePlayer : state.bot.scoreBot,
+    score_loser: p1Won ? state.bot.scoreBot : state.bot.scorePlayer,
+    racks: Math.max(0, (state.bot.rack || 1) - 1),
+  });
+}
 
 const PRED_INTERVAL = 50; // ms between prediction recomputes while dragging
 const PRED_MAX_TIME = 5; // seconds of predicted motion
@@ -76,8 +115,9 @@ const state = {
   answered: false,
   zone: null,
   pottedIds: [], // live list of ball ids dropped into pockets on the current rack/layout
+  pvp: null, // online 1 vs 1 session (see the "1 vs 1 online" section), null outside online matches
   bot: {
-    matchType: 'pve', // 'pve' | 'bvb'
+    matchType: 'pve', // 'pve' | 'bvb' | 'pvp'
     bot1Name: 'Alpha',
     bot2Name: 'Beta',
     bot1Diff: 'hard',
@@ -134,10 +174,20 @@ let seenCushionCount = 0;
 const isAimReady = () => state.phase === 'aim' && !strokePending;
 const isBotMode = () => state.mode === 'bot';
 const isBvbMode = () => isBotMode() && state.bot.matchType === 'bvb';
-const isBotTurn = () => isBotMode() && (isBvbMode() || state.bot.turn === 'bot');
+const isPvpMode = () => isBotMode() && state.bot.matchType === 'pvp' && !!state.pvp;
+/** Online match: it is my turn to aim/shoot (connected, in sync, not waiting for a new rack, match still running). */
+const pvpMyTurn = () => {
+  const pv = state.pvp;
+  return isPvpMode() && state.bot.turn === pv.myWho && pv.connected && pv.synced && !pv.rackPending && !pv.ended && !state.bot.matchOver;
+};
+// "Bot turn" means "input is not mine": the AI's turn, or in an online match anything that is not my turn
+const isBotTurn = () => isBotMode() && (isPvpMode() ? !pvpMyTurn() : isBvbMode() || state.bot.turn === 'bot');
 const isPlayerReady = () => isAimReady() && !isBotTurn();
+/** Which difficulty's aim aid is drawn: online matches use the medium aid for both players. */
+const aidDiffKey = () => (isPvpMode() ? 'medium' : isBvbMode() ? botDiffOf(state.bot.turn) : state.bot.difficulty);
 
 function botNameOf(who) {
+  if (isPvpMode()) return state.pvp.names[who] || (who === 'player' ? 'Chủ phòng' : 'Khách');
   if (state.bot.matchType === 'bvb') {
     if (who === 'bot1' || who === 'player') return state.bot.bot1Name || 'Alpha';
     if (who === 'bot2' || who === 'bot') return state.bot.bot2Name || 'Beta';
@@ -154,7 +204,7 @@ function botDiffOf(who) {
 }
 
 function isHeroWho(who) {
-  if (state.mode !== 'bot') return false;
+  if (state.mode !== 'bot' || isPvpMode()) return false; // online players are never the Hero profile
   if (state.bot.matchType !== 'bvb') return who === 'bot' && state.bot.difficulty === 'hero'; // never the human player
   const diff = botDiffOf(who);
   if (diff === 'hero') return true;
@@ -342,6 +392,10 @@ function effOverlays() {
   }
   const o = state.overlays;
   if (state.mode === 'bot') {
+    if (isPvpMode()) {
+      const aid = botAidFor('medium');
+      return { aim: aid.aim, actual: false, ghost: aid.ghost, pocket: aid.pocket, tangent: aid.tangent, roll: false, predict: false };
+    }
     if (isBotTurn()) {
       if (isBvbMode()) {
         const diff = botDiffOf(state.bot.turn);
@@ -473,8 +527,7 @@ function computeManualInfo(cue) {
   const aimDir = { x: Math.cos(rad(state.aimAngle)), y: Math.sin(rad(state.aimAngle)) };
   const effElev = elevation(aimDir);
   const launch = computeLaunch(aimDir, state.power, state.tip, eq.cue, noMiscueRng, effElev);
-  const curDiff = isBvbMode() ? botDiffOf(state.bot.turn) : state.bot.difficulty;
-  const aid = state.mode === 'bot' ? botAidFor(curDiff) : null;
+  const aid = state.mode === 'bot' ? botAidFor(aidDiffKey()) : null;
   const rayDir = aid ? aimDir : launch.dir;
   const wallT = rayWallT(cue.pos, rayDir);
   const base = {
@@ -667,6 +720,7 @@ function frame(now) {
     }
   }
   render();
+  if (isPvpMode()) pvpTickAim(now);
   if (state.phase === 'shooting' || compStale || (predDirty && state.phase === 'aim') || (view === '3d' && v3 && v3.animating())) schedule();
 }
 
@@ -680,8 +734,7 @@ function buildScene() {
     const t = ball(state.targetId);
     if (c && t) headingHint = Math.atan2(t.pos.y - c.pos.y, t.pos.x - c.pos.x);
   }
-  const curDiff = isBvbMode() ? botDiffOf(state.bot.turn) : state.bot.difficulty;
-  const botAid = state.mode === 'bot' ? botAidFor(curDiff) : null;
+  const botAid = state.mode === 'bot' ? botAidFor(aidDiffKey()) : null;
   let sceneTargetId = info && info.manual ? info.objId : state.targetId;
   let sceneShowTarget = state.aimAid !== false && !shooting && state.mode !== 'thickness';
   if (state.mode === 'bot') {
@@ -785,16 +838,24 @@ function startShot(allowBot = false) {
   doShot();
 }
 
-function doShot() {
-  if (!info || state.phase !== 'aim') return;
+/** remote: shot payload received from the opponent (online match); balls are already placed from it. */
+function doShot(remote = null) {
+  if (remote ? state.phase !== 'aim' : !info || state.phase !== 'aim') return;
   if (state.mode === 'thickness' && !state.answered) return;
   lastScratch = false;
-  info = computeInfo(true); // fresh aim-solver result, never a throttled stale one
+  if (!remote) info = computeInfo(true); // fresh aim-solver result, never a throttled stale one
   state.preShot = snapshot();
   state.preShot.lowest = lowestObjectId();
   state.preShot.aimOffset = state.aimOffset;
-  state.sim = createSim(state.balls, { recordPaths: true, table: eq.table, cue: eq.cue });
-  const launch = state.sim.strike({ aimDir: info.aimDir, power: state.power, tip: state.tip, elevationDeg: elevation(info.aimDir) });
+  let strikeParams;
+  let simRng; // undefined = Math.random; online matches use the shot's shared seed so both devices miscue identically
+  if (isPvpMode()) {
+    ({ strikeParams, simRng } = pvpPrepareShot(remote));
+  } else {
+    strikeParams = { aimDir: info.aimDir, power: state.power, tip: state.tip, elevationDeg: elevation(info.aimDir) };
+  }
+  state.sim = createSim(state.balls, { recordPaths: true, table: eq.table, cue: eq.cue, rng: simRng });
+  const launch = state.sim.strike(strikeParams);
   sound.cueHit(state.power, !!(launch && launch.miscue));
   state.phase = 'shooting';
   lastT = 0;
@@ -823,9 +884,12 @@ function finishShot() {
   const objPotted = ev.potted.filter((id) => id !== 0);
   const finalBalls = sim.balls;
   const miscue = ev.miscue;
+  pvpLastToast = '';
   const toast = (msg, kind) => {
     // keep the miscue notice visible when the shot result would overwrite it
-    panel.toast(miscue && kind !== 'ok' ? `${msg} (trượt cơ)` : msg, kind);
+    const text = miscue && kind !== 'ok' ? `${msg} (trượt cơ)` : msg;
+    pvpLastToast = text; // online: the shooter sends this text to the opponent with the sync
+    panel.toast(text, kind);
   };
 
   // new table state
@@ -852,6 +916,19 @@ function finishShot() {
   if (!ball(state.targetId) || objPotted.includes(state.targetId)) {
     state.targetId = lowestObjectId();
     state.pocket = null;
+  }
+
+  if (isPvpMode()) {
+    // Online: only the shooter applies the rules; the other device waits for the shooter's sync (see pvpRemoteShotDone)
+    if (state.pvp.ended) {
+      invalidate();
+      return;
+    }
+    if (state.pvp.shotBy !== 'me') {
+      pvpRemoteShotDone();
+      invalidate();
+      return;
+    }
   }
 
   const mode = state.mode;
@@ -909,6 +986,10 @@ function finishShot() {
     panel.updateStats(stats);
   } else if (mode === 'bot') {
     const isBvb = state.bot.matchType === 'bvb';
+    const isPvp = isPvpMode();
+    const neutral = isBvb || isPvp; // texts that name both players instead of "Bạn"/"Bot"
+    /** Does this device's player aim next for `who`? (vs the bot, or the opponent in an online match) */
+    const aimsForMe = (who) => (isPvp ? who === state.pvp.myWho : !isBvb && who === 'player');
     const turnWas = state.bot.turn;
     const opp = isBvb
       ? (turnWas === 'bot1' ? 'bot2' : 'bot1')
@@ -1027,9 +1108,11 @@ function finishShot() {
 
       if (matchWon) {
         state.bot.matchOver = true;
+        trackMatchEnd(rackWinner, 'race');
         sound.cheer?.();
-        const p1Name = isBvb ? state.bot.bot1Name : 'Bạn';
-        const p2Name = isBvb ? state.bot.bot2Name : (state.bot.difficulty === 'hero' ? 'Hero' : 'Bot');
+        const p1Name = isPvp ? botNameOf('player') : isBvb ? state.bot.bot1Name : 'Bạn';
+        const p2Name = isPvp ? botNameOf('bot') : isBvb ? state.bot.bot2Name : (state.bot.difficulty === 'hero' ? 'Hero' : 'Bot');
+        if (isPvp) state.pvp.rematch = { me: false, peer: false };
         state.bot.statusText = `🏆 TRẬN ĐẤU KẾT THÚC: ${winnerName} chiến thắng chung cuộc (${p1Score} - ${p2Score}, Chạm ${raceTo})!`;
         toast(state.bot.statusText, 'ok');
         panel.setMatchWin(true, {
@@ -1039,11 +1122,12 @@ function finishShot() {
           name2: p2Name,
           score1: p1Score,
           score2: p2Score,
+          pvp: isPvp,
         });
         syncControls();
         panel.setTurnLocked(true);
       } else {
-        if (isBvb) {
+        if (neutral) {
           state.bot.statusText = res.loseRack
             ? `🏆 ${winnerName} thắng ván ${rackNo} (${nameWas} phạm lỗi bi 8)! Chuẩn bị ván mới...`
             : `🎉 ${winnerName} thắng ván ${rackNo}! Chuẩn bị ván mới...`;
@@ -1063,7 +1147,8 @@ function finishShot() {
         syncControls();
         panel.setTurnLocked(true);
         state.bot.pendingRack = rackWinner; // survives a pause, which clears the timer
-        addBotTimer(() => startBotRack(rackWinner), Math.round(1500 * delayScale));
+        // online: only the room host racks (random layout) and then syncs the guest
+        if (!isPvp || state.pvp.seat === 1) addBotTimer(() => startBotRack(rackWinner), Math.round(1500 * delayScale));
       }
     } else if (res.foul) {
       const next = opp;
@@ -1074,10 +1159,11 @@ function finishShot() {
       state.aimOffset = 0;
       state.tip = { x: 0, y: 0 };
       panel.spinPad.set(state.tip, true);
-      if (isBvb) {
+      if (neutral) {
         state.targetId = firstLegalFor(next);
         state.bot.statusText = `⚠️ ${nameWas} phạm lỗi (${res.foulReason})! Đến lượt ${nameOpp} (đặt bi).`;
         toast(`${nameWas} phạm lỗi: ${res.foulReason}`, 'bad');
+        if (aimsForMe(next)) aimAtTargetFor(next);
       } else if (next === 'player') {
         aimAtTargetFor('player');
         state.bot.statusText = `Bot phạm lỗi (${res.foulReason}). Kéo bi cái đặt tùy ý!`;
@@ -1094,23 +1180,23 @@ function finishShot() {
       state.bot.isFoul = false;
       state.aimMode = 'manual';
       state.aimOffset = 0;
-      if (!isBvb && turnWas === 'player') aimAtTargetFor('player');
+      if (aimsForMe(turnWas)) aimAtTargetFor(turnWas);
       else state.targetId = firstLegalFor(turnWas);
       const assignNote = isEight && res.assignedGroup
         ? ` (${nameWas} nhận ${res.assignedGroup === 'solids' ? 'bi trơn 1–7' : 'bi sọc 9–15'})`
         : '';
-      state.bot.statusText = isBvb
+      state.bot.statusText = neutral
         ? `🎯 ${nameWas} ăn bi${assignNote} và tiếp tục đánh ${groupTextFor(turnWas)}...`
         : turnWas === 'player'
           ? `Vào bi!${assignNote} Đánh tiếp ${groupTextFor('player')}.`
           : `Bot ăn bi${assignNote} và tiếp tục đánh ${groupTextFor('bot')}...`;
       toast(
-        isBvb
+        neutral
           ? `🎯 ${nameWas} đánh vào lỗ!${assignNote}`
           : turnWas === 'player'
             ? `Vào lỗ!${assignNote} Tiếp tục lượt bạn.`
             : `Bot đánh vào lỗ!${assignNote}`,
-        isBvb ? 'ok' : turnWas === 'player' ? 'ok' : '',
+        neutral ? 'ok' : turnWas === 'player' ? 'ok' : '',
       );
       syncControls();
       if (isBvb || turnWas === 'bot') scheduleBotTurn();
@@ -1121,14 +1207,14 @@ function finishShot() {
       state.bot.isFoul = false;
       state.aimMode = 'manual';
       state.aimOffset = 0;
-      if (!isBvb && next === 'player') aimAtTargetFor('player');
+      if (aimsForMe(next)) aimAtTargetFor(next);
       else state.targetId = firstLegalFor(next);
-      state.bot.statusText = isBvb
+      state.bot.statusText = neutral
         ? `Lượt của ${nameOpp} — mục tiêu ${groupTextFor(next)}.`
         : next === 'player'
           ? `Lượt bạn — mục tiêu ${groupTextFor('player')}.`
           : `Đến lượt Bot (${groupTextFor('bot')})...`;
-      toast(isBvb ? `Đến lượt ${nameOpp}...` : next === 'player' ? 'Đến lượt bạn!' : 'Đến lượt Bot...', '');
+      toast(neutral ? `Đến lượt ${nameOpp}...` : next === 'player' ? 'Đến lượt bạn!' : 'Đến lượt Bot...', '');
       syncControls();
       if (isBvb || next === 'bot') scheduleBotTurn();
     }
@@ -1155,6 +1241,10 @@ function finishShot() {
       kind = 'bad';
     }
     toast(msg, kind);
+  }
+  if (isPvpMode() && state.pvp.shotBy === 'me') {
+    state.pvp.shotBy = null;
+    pvpSendSync('result', pvpLastToast);
   }
   if (ev.offTable.length && mode !== 'bot') toast('Bi bay khỏi bàn!', 'bad');
   if (mode !== 'bot') syncControls();
@@ -1498,6 +1588,7 @@ function initDraggableHud() {
 function syncBotUi() {
   const isEight = state.bot.game === '8ball';
   const isBvb = state.bot.matchType === 'bvb';
+  const isPvp = isPvpMode();
   const who = state.bot.turn;
   const currentGrp = isEight ? state.bot.groups[who] : null;
   const targetOrIds = isEight ? eightBallTargetIds(state.balls, currentGrp) : lowestBallId(state.balls);
@@ -1520,8 +1611,9 @@ function syncBotUi() {
 
   panel.setBotHud({
     matchType: state.bot.matchType,
-    bot1Name: state.bot.bot1Name,
-    bot2Name: state.bot.bot2Name,
+    bot1Name: isPvp ? botNameOf('player') : state.bot.bot1Name,
+    bot2Name: isPvp ? botNameOf('bot') : state.bot.bot2Name,
+    myWho: isPvp ? state.pvp.myWho : 'player',
     bot1Diff: state.bot.bot1Diff,
     bot2Diff: state.bot.bot2Diff,
     paused: state.bot.paused,
@@ -1551,12 +1643,12 @@ function syncBotUi() {
       const tvRackBadge = document.getElementById('tvRackBadge');
       if (tvRackBadge) tvRackBadge.textContent = `VÁN ${state.bot.rack || 1}`;
 
-      const name1 = isBvb ? state.bot.bot1Name : 'BẠN';
-      const name2 = isBvb ? state.bot.bot2Name : 'BOT';
-      const diff1 = isBvb
+      const name1 = isPvp ? botNameOf('player') : isBvb ? state.bot.bot1Name : 'BẠN';
+      const name2 = isPvp ? botNameOf('bot') : isBvb ? state.bot.bot2Name : 'BOT';
+      const diff1 = isPvp ? 'CHỦ PHÒNG' : isBvb
         ? (state.bot.bot1Diff === 'hero' ? 'HERO' : (BOT_DIFFICULTIES[state.bot.bot1Diff]?.shortLabel || 'TB').toUpperCase())
         : 'CƠ THỦ';
-      const diff2 = isBvb
+      const diff2 = isPvp ? 'KHÁCH' : isBvb
         ? (state.bot.bot2Diff === 'hero' ? 'HERO' : (BOT_DIFFICULTIES[state.bot.bot2Diff]?.shortLabel || 'PRO').toUpperCase())
         : (state.bot.difficulty === 'hero' ? 'HERO' : (BOT_DIFFICULTIES[state.bot.difficulty]?.shortLabel || 'TB').toUpperCase());
 
@@ -1601,11 +1693,13 @@ function syncBotUi() {
   } else {
     panel.setTurnLocked(false);
   }
+  if (isPvp) pvpUpdateHud();
   updateButtons();
 }
 
 function startBotRack(breaker = state.bot.breaker) {
   clearBotTimers();
+  matchEndTracked = false;
   state.bot.pendingRack = null;
   if (state.bot.game === '8ball') rackEight();
   else rackNine();
@@ -1627,6 +1721,11 @@ function startBotRack(breaker = state.bot.breaker) {
   const gLabel = BOT_GAMES[state.bot.game]?.label || '9 Bi';
   if (state.bot.matchType === 'bvb') {
     state.bot.statusText = `Ván ${state.bot.rack} (${gLabel}): 🤖 ${botNameOf(breaker)} chuẩn bị phá bi...`;
+  } else if (isPvpMode()) {
+    state.bot.statusText = `Ván ${state.bot.rack} (${gLabel}): ${botNameOf(breaker)} phá bi.`;
+    state.pvp.rackPending = false;
+    state.pvp.synced = true;
+    state.bot.pendingRack = null;
   } else {
     state.bot.statusText = breaker === 'player'
       ? `Ván mới (${gLabel}): kéo bi cái sau vạch đầu bàn và phá bi!`
@@ -1634,10 +1733,12 @@ function startBotRack(breaker = state.bot.breaker) {
   }
   syncControls();
   invalidate();
+  if (isPvpMode() && state.pvp.seat === 1) pvpSendSync('rack'); // only the host racks; the guest receives the layout
   if (breaker === 'bot' || state.bot.matchType === 'bvb') scheduleBotTurn();
 }
 
 function scheduleBotTurn() {
+  if (isPvpMode()) return; // no AI in online matches (and keep the pending rack timer)
   clearBotTimers();
   if (state.mode !== 'bot' || state.phase !== 'aim') return;
   if (!isBotTurn()) return;
@@ -1769,6 +1870,7 @@ function scheduleBotTurn() {
 }
 
 function enterBotMode(difficulty, game, raceTo) {
+  leavePvpIfNeeded();
   if (!isAimReady()) return;
   clearBotTimers();
   delete document.body.dataset.bvb;
@@ -1790,9 +1892,12 @@ function enterBotMode(difficulty, game, raceTo) {
   state.bot.rack = 1;
   state.bot.breaker = 'player';
   startBotRack('player');
+  trackMatchStart();
 }
 
 function enterBvbMode(opts = {}) {
+  if (!DEV_BUILD) return; // Bot vs Bot is a develop-only feature
+  leavePvpIfNeeded();
   if (!isAimReady()) return;
   clearBotTimers();
   document.body.dataset.bvb = 'true';
@@ -1818,9 +1923,11 @@ function enterBvbMode(opts = {}) {
   state.bot.rack = 1;
   state.bot.breaker = 'bot1';
   startBotRack('bot1');
+  trackMatchStart();
 }
 
 function enterPracticeMode(subMode = state.practiceMode, opts = {}) {
+  leavePvpIfNeeded();
   if (!isAimReady()) return;
   clearBotTimers();
   delete document.body.dataset.bvb;
@@ -1839,6 +1946,844 @@ function enterPracticeMode(subMode = state.practiceMode, opts = {}) {
   setMode(nextSub, { forceReset: state.mode === 'bot' });
 }
 
+/* ------------------------------------------------------------------ 1 vs 1 online */
+// Shooter-authoritative: the player at the table sends `shot` (balls + parameters + seed), both devices run the same
+// simulation, only the shooter applies the rules and then sends `sync` (full snapshot) which the other device applies
+// once its own animation is over. The relay server never simulates anything.
+
+const PVP_FIXED_TABLE = 'club-9ft';
+const PVP_FIXED_CUE = 'standard';
+const PVP_RACK_DELAY = 1500; // ms between a rack result and the next rack (host only)
+const PVP_SYNC_SLOW_MS = 8000; // waiting longer than this for the shooter's sync shows "Đang đồng bộ…"
+const PVP_ERRORS = {
+  'no-room': 'Không có phòng với mã này.',
+  'room-full': 'Phòng đã đủ 2 người.',
+  'bad-token': 'Không vào lại được phòng (phiên đã hết hạn).',
+  'bad-message': 'Yêu cầu không hợp lệ. Hãy kiểm tra tên và mã phòng.',
+  'rate-limit': 'Thao tác quá nhanh, hãy thử lại sau giây lát.',
+};
+
+let pvpClient = null; // net client for the lobby phase and the match
+let pvpPending = null; // runs once the socket is open (create / join / rejoin)
+let pvpLobbyCtx = null; // { role: 'host' | 'guest', name, game, raceTo, code, token } until the match starts
+let pvpResume = null; // saved session being resumed after a page reload
+let pvpLastToast = ''; // last toast text of the shot being finished (sent to the opponent with the sync)
+const pvpGate = createShotGate((sync) => pvpOnGateReady(sync));
+
+const pvpSend = (p) => !!pvpClient && pvpClient.send({ t: 'relay', p });
+
+function pvpMakeClient() {
+  const c = createNetClient({
+    url: serverUrl(),
+    onMessage: (msg) => {
+      if (c === pvpClient) pvpOnNet(msg);
+    },
+    onStatus: (st) => {
+      if (c === pvpClient) pvpOnStatus(st);
+    },
+  });
+  return c;
+}
+
+function leavePvpIfNeeded() {
+  if (state.pvp) {
+    pvpTeardown({ notify: true });
+  } else if (pvpClient) {
+    pvpDisconnect({ notify: true });
+    panel.setPvpLobby({ phase: 'idle' });
+  }
+}
+
+/** Close the socket and forget the session (the room is closed on the server when notify is true). */
+function pvpDisconnect({ notify = true } = {}) {
+  const c = pvpClient;
+  pvpClient = null;
+  pvpPending = null;
+  pvpLobbyCtx = null;
+  pvpResume = null;
+  if (c) {
+    if (notify && c.status === 'open') c.send({ t: 'leave' });
+    c.setSession(null);
+    c.close();
+  }
+  pvpGate.reset();
+  const pv = state.pvp;
+  if (pv) {
+    clearTimeout(pv.syncTimer);
+    clearTimeout(pv.aimTimer);
+    clearInterval(pv.hudTimer);
+  }
+}
+
+/** Leave the online match state (equipment, flags). Does not touch the screen layout: see pvpLeave. */
+function pvpTeardown({ notify = true } = {}) {
+  const hadMatch = !!state.pvp;
+  pvpDisconnect({ notify });
+  if (!hadMatch) return;
+  clearBotTimers();
+  state.pvp = null;
+  state.bot.matchType = 'pve';
+  state.bot.matchOver = false;
+  state.bot.pendingRack = null;
+  state.sim = null;
+  state.phase = 'aim';
+  strokePending = false;
+  dropAnims = [];
+  timeScale = 1;
+  state.botElevation = null;
+  panel.setMatchWin(false);
+  panel.setPvpHud({ visible: false });
+  loadingHash = true; // no "table resized" toast
+  try {
+    onEquipmentChange(settings.get());
+  } finally {
+    loadingHash = false;
+  }
+  settings.setChipOverride(null);
+}
+
+/** Back to the practice board and the lobby. */
+function pvpLeave({ confirmFirst = false, notify = true, toastMsg = '' } = {}) {
+  if (confirmFirst && state.pvp && !state.bot.matchOver && typeof window.confirm === 'function') {
+    if (!window.confirm('Rời phòng? Trận đang chơi sẽ kết thúc.')) return;
+  }
+  pvpTeardown({ notify });
+  enterPracticeMode('free');
+  state.lobbyOpen = true;
+  panel.setLobbyOpen(true);
+  panel.setPvpLobby({ phase: 'idle' });
+  if (toastMsg) panel.toast(toastMsg, 'warn');
+}
+
+function openPvpLobby() {
+  if (state.pvp) {
+    panel.toast('Bạn đang trong phòng online. Bấm "Rời phòng" để thoát.', 'warn');
+    return;
+  }
+  state.lobbyOpen = true;
+  panel.setLobbyOpen(true);
+  panel.focusPvpLobby(null);
+}
+
+/* ---- lobby: create / join / cancel / copy link */
+
+function pvpStartLobby(kind, opts) {
+  if (pvpClient) pvpDisconnect({ notify: true });
+  const name = sanitizeName(opts.name);
+  if (kind === 'join' && !ROOM_CODE_RE.test(opts.code)) {
+    panel.setPvpLobby({ phase: 'idle', error: 'Mã phòng gồm 5 ký tự (chữ và số).' });
+    return;
+  }
+  pvpLobbyCtx = { role: kind === 'create' ? 'host' : 'guest', name, game: opts.game || '9ball', raceTo: opts.raceTo ?? 5, code: opts.code || '', token: '' };
+  const msg = kind === 'create'
+    ? { t: 'create', name, game: pvpLobbyCtx.game, raceTo: pvpLobbyCtx.raceTo }
+    : { t: 'join', code: opts.code, name };
+  pvpClient = pvpMakeClient();
+  pvpPending = () => pvpClient.send(msg);
+  panel.setPvpLobby({ phase: 'connecting' });
+  pvpClient.connect();
+}
+
+function pvpCancelLobby() {
+  pvpDisconnect({ notify: true });
+  panel.setPvpLobby({ phase: 'idle' });
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (e) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      ta.remove();
+      return ok;
+    } catch (e2) {
+      return false;
+    }
+  }
+}
+
+/** Copy just the room code (the opponent types it into "Vào phòng"). */
+async function pvpCopyCode() {
+  const code = pvpLobbyCtx && pvpLobbyCtx.code;
+  if (!code) return;
+  const ok = await copyText(code);
+  panel.toast(ok ? `Đã sao chép mã phòng ${code}` : `Không sao chép được – mã phòng: ${code}`, ok ? 'ok' : 'warn');
+}
+
+async function pvpCopyLink() {
+  const code = pvpLobbyCtx && pvpLobbyCtx.code;
+  if (!code) return;
+  const url = roomLink(location.origin === 'null' ? '' : location.origin, location.pathname, code);
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'MimePool 1 vs 1', text: `Vào phòng MimePool ${code}`, url });
+      return;
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+    }
+  }
+  const ok = await copyText(url);
+  panel.toast(ok ? 'Đã sao chép liên kết mời' : `Không sao chép được – mã phòng: ${code}`, ok ? 'ok' : 'warn');
+}
+
+/** Reload while in a room: sessionStorage still holds { code, token }, ask the server for the seat back. */
+function pvpTryResume() {
+  const sess = loadSession();
+  if (!sess) return false;
+  pvpResume = sess;
+  pvpClient = pvpMakeClient();
+  pvpPending = () => pvpClient.send({ t: 'rejoin', code: sess.code, token: sess.token });
+  panel.setPvpLobby({ phase: 'connecting' });
+  pvpClient.connect();
+  return true;
+}
+
+/* ---- network events */
+
+function pvpOnStatus(st) {
+  if (st === 'open') {
+    // after an automatic reconnect the client sends `rejoin` itself
+    if (pvpPending && !pvpClient.rejoined) {
+      const run = pvpPending;
+      pvpPending = null;
+      run();
+    } else if (pvpClient.rejoined) {
+      pvpPending = null;
+    }
+    return;
+  }
+  if (st === 'reconnecting') {
+    if (state.pvp) {
+      state.pvp.connected = false;
+      pvpUpdateHud();
+      syncControls();
+    }
+    return;
+  }
+  if (st === 'closed') {
+    const inMatch = !!state.pvp;
+    pvpDisconnect({ notify: false });
+    if (inMatch) pvpLeave({ notify: false, toastMsg: 'Mất kết nối máy chủ – đã rời phòng' });
+    else panel.setPvpLobby({ phase: 'idle', error: 'Không kết nối được máy chủ. Hãy kiểm tra mạng rồi thử lại.' });
+  }
+}
+
+function pvpOnNet(msg) {
+  const pv = state.pvp;
+  switch (msg.t) {
+    case 'created':
+    case 'joined':
+      pvpOnRoomReply(msg);
+      break;
+    case 'peer-joined':
+      if (!pv && pvpLobbyCtx && pvpLobbyCtx.role === 'host') {
+        const c = pvpLobbyCtx;
+        enterPvpMatch({ seat: 1, code: c.code, token: c.token, hostName: c.name, guestName: msg.name, game: c.game, raceTo: c.raceTo, peerOnline: true });
+      }
+      break;
+    case 'peer-left':
+      if (!pv) break;
+      pv.peerOnline = false;
+      pv.peerOffUntil = Date.now() + (msg.graceMs || 60000);
+      pvpStartHudTimer();
+      pvpUpdateHud();
+      break;
+    case 'peer-back':
+      if (!pv) break;
+      pv.peerOnline = true;
+      pv.peerOffUntil = 0;
+      clearInterval(pv.hudTimer);
+      pvpUpdateHud();
+      pvpSendResyncIfIdle();
+      break;
+    case 'room-closed':
+      if (pv) {
+        pvpLeave({ notify: false, toastMsg: msg.reason === 'timeout' ? 'Phòng đã hết hạn (đối thủ mất kết nối quá lâu)' : 'Đối thủ đã rời phòng' });
+      } else {
+        pvpDisconnect({ notify: false });
+        panel.setPvpLobby({ phase: 'idle', error: msg.reason === 'timeout' ? 'Phòng đã hết hạn.' : '' });
+      }
+      break;
+    case 'error': {
+      const text = PVP_ERRORS[msg.code] || 'Có lỗi kết nối.';
+      if (msg.code === 'rate-limit' || (pv && msg.code === 'bad-message')) {
+        panel.toast(text, 'warn');
+      } else if (pv) {
+        pvpLeave({ notify: false, toastMsg: text });
+      } else {
+        pvpDisconnect({ notify: false });
+        panel.setPvpLobby({ phase: 'idle', error: text });
+      }
+      break;
+    }
+    case 'relay':
+      if (pv) pvpHandle(msg.p);
+      break;
+    default:
+      break;
+  }
+}
+
+/** `created` (seat 1) / `joined` (seat 2): reply to create, join or rejoin. */
+function pvpOnRoomReply(msg) {
+  const { seat, code, token } = msg;
+  if (state.pvp) {
+    // the automatic rejoin after a network drop succeeded
+    state.pvp.token = token;
+    pvpSaveSession();
+    pvpOnReconnected(msg.peerOnline !== false);
+    return;
+  }
+  if (pvpResume) {
+    const r = pvpResume;
+    pvpResume = null;
+    const game = msg.game || r.game || '9ball';
+    const raceTo = msg.raceTo ?? r.raceTo ?? 5;
+    if (seat === 1 && !r.guestName) {
+      // reloaded while still waiting for an opponent: back to the waiting card
+      pvpLobbyCtx = { role: 'host', name: r.hostName || 'Người chơi', game, raceTo, code, token };
+      pvpSaveSessionRaw({ code, token, seat: 1, hostName: pvpLobbyCtx.name, guestName: null, game, raceTo });
+      panel.setPvpLobby({ phase: 'waiting', code });
+      return;
+    }
+    enterPvpMatch({
+      seat,
+      code,
+      token,
+      hostName: seat === 2 ? msg.hostName : r.hostName || 'Chủ phòng',
+      guestName: r.guestName || 'Khách',
+      game,
+      raceTo,
+      peerOnline: msg.peerOnline !== false,
+      resumed: true,
+    });
+    return;
+  }
+  const ctx = pvpLobbyCtx;
+  if (!ctx) return;
+  if (msg.t === 'created') {
+    ctx.code = code;
+    ctx.token = token;
+    pvpSaveSessionRaw({ code, token, seat: 1, hostName: ctx.name, guestName: null, game: ctx.game, raceTo: ctx.raceTo });
+    panel.setPvpLobby({ phase: 'waiting', code });
+    analytics.track('room_create', { game: ctx.game, race_to: ctx.raceTo });
+  } else {
+    analytics.track('room_join', { game: msg.game, race_to: msg.raceTo });
+    enterPvpMatch({ seat: 2, code, token, hostName: msg.hostName, guestName: ctx.name, game: msg.game, raceTo: msg.raceTo, peerOnline: true });
+  }
+}
+
+function pvpSaveSessionRaw(sess) {
+  if (pvpClient) pvpClient.setSession(sess);
+}
+function pvpSaveSession() {
+  const pv = state.pvp;
+  if (!pv) return;
+  pvpSaveSessionRaw({ code: pv.code, token: pv.token, seat: pv.seat, hostName: pv.names.player, guestName: pv.names.bot, game: state.bot.game, raceTo: state.bot.raceTo });
+}
+
+function pvpOnReconnected(peerOnline) {
+  const pv = state.pvp;
+  pv.connected = true;
+  pv.peerOnline = peerOnline;
+  if (peerOnline) clearInterval(pv.hudTimer);
+  else {
+    pv.peerOffUntil = pv.peerOffUntil || Date.now() + 60000;
+    pvpStartHudTimer();
+  }
+  pvpUpdateHud();
+  syncControls();
+  panel.toast('Đã kết nối lại', 'ok');
+  // a sync that could not be sent while offline goes out now
+  if (pv.lastSync && !pv.lastSync.sent) pv.lastSync.sent = pvpSend(pv.lastSync.p);
+}
+
+/* ---- match start / hud */
+
+function enterPvpMatch({ seat, code, token, hostName, guestName, game, raceTo, peerOnline = true, resumed = false }) {
+  clearBotTimers();
+  delete document.body.dataset.bvb;
+  state.sim = null;
+  state.phase = 'aim';
+  strokePending = false;
+  dropAnims = [];
+  timeScale = 1;
+  if (state.mode === 'free') state.freeBackup = snapshot();
+  const myWho = seatToWho(seat);
+  state.pvp = {
+    seat,
+    myWho,
+    names: { player: hostName || 'Chủ phòng', bot: guestName || 'Khách' },
+    code,
+    token,
+    connected: true,
+    peerOnline,
+    peerOffUntil: 0,
+    seq: 0, // highest shot number seen (own or received)
+    appliedResultSeq: -1,
+    waitingSync: false,
+    waitingSyncSlow: false,
+    rematch: { me: false, peer: false },
+    remoteShot: null, // { seq } while the opponent's shot is being animated / waiting for its sync
+    queue: [], // payloads that arrived while busy with a remote shot
+    lastSync: null, // { p, sent } last result/rack sync produced here (re-sent after a reconnect if not sent)
+    synced: seat === 1 && !resumed, // false until the first snapshot of the match is in place
+    rackPending: false,
+    ended: null, // { loser } after a resignation
+    shotBy: null, // 'me' | 'peer' for the shot in flight
+    syncTimer: 0,
+    aimTimer: 0,
+    hudTimer: 0,
+    lastAimKey: '',
+    lastAimAt: 0,
+  };
+  pvpGate.reset();
+  pvpLobbyCtx = null;
+  pvpResume = null;
+  state.bot.matchType = 'pvp';
+  state.bot.game = game;
+  state.bot.raceTo = raceTo;
+  state.bot.matchOver = false;
+  state.bot.paused = false;
+  state.bot.scorePlayer = 0;
+  state.bot.scoreBot = 0;
+  state.bot.rack = 1;
+  state.bot.breaker = 'player';
+  state.bot.turn = 'player';
+  state.bot.pendingRack = null;
+  panel.setMatchWin(false);
+  pvpSaveSession();
+  pvpUseFixedEquipment();
+  state.appMode = 'pvp';
+  state.mode = 'bot';
+  state.lobbyOpen = false;
+  panel.setLobbyOpen(false);
+  panel.setPvpLobby({ phase: 'idle' });
+  panel.setAppMode('pvp');
+  panel.setActiveTab('bot');
+  if (!peerOnline) {
+    state.pvp.peerOffUntil = Date.now() + 60000;
+    pvpStartHudTimer();
+  }
+  if (!resumed) trackMatchStart();
+  if (seat === 1 && !resumed) {
+    startBotRack('player'); // host breaks first and sends the layout
+  } else {
+    state.bot.statusText = resumed ? 'Đang đồng bộ lại trận đấu…' : 'Đang chờ chủ phòng xếp bi…';
+    syncControls();
+    invalidate();
+  }
+  pvpUpdateHud();
+}
+
+function pvpUseFixedEquipment() {
+  const next = { table: tablePreset(PVP_FIXED_TABLE), cue: cuePreset(PVP_FIXED_CUE) };
+  loadingHash = true; // no "table resized" toast
+  try {
+    onEquipmentChange(next);
+  } finally {
+    loadingHash = false;
+  }
+  settings.setChipOverride(`Bàn: ${next.table.name} · Gậy: ${next.cue.name} (cố định khi chơi online)`);
+}
+
+function pvpUpdateHud() {
+  const pv = state.pvp;
+  if (!pv) return;
+  let text = 'Đã kết nối';
+  let kind = 'ok';
+  if (!pv.connected) {
+    text = 'Đang kết nối lại…';
+    kind = 'warn';
+  } else if (!pv.peerOnline) {
+    const secs = Math.max(0, Math.ceil((pv.peerOffUntil - Date.now()) / 1000));
+    text = `Đối thủ mất kết nối – chờ ${secs}s`;
+    kind = 'warn';
+  } else if (!pv.synced || pv.waitingSyncSlow) {
+    text = 'Đang đồng bộ…';
+    kind = 'warn';
+  }
+  panel.setPvpHud({ visible: true, text, kind });
+}
+
+function pvpStartHudTimer() {
+  const pv = state.pvp;
+  if (!pv) return;
+  clearInterval(pv.hudTimer);
+  pv.hudTimer = setInterval(() => {
+    if (!state.pvp || state.pvp.peerOnline) {
+      clearInterval(pv.hudTimer);
+      return;
+    }
+    pvpUpdateHud();
+  }, 1000);
+}
+
+/* ---- sending */
+
+/** reason: 'result' | 'rack' | 'resync'. Result and rack snapshots are remembered so a reconnect can re-send them. */
+function pvpSendSync(reason, toastMsg = '') {
+  const pv = state.pvp;
+  if (!pv) return;
+  const p = {
+    k: 'sync',
+    seq: pv.seq,
+    reason,
+    balls: packBalls(state.balls, { withQuat: true }),
+    potted: [...state.pottedIds],
+    match: packMatch(state),
+  };
+  if (toastMsg) p.toast = toastMsg;
+  const sent = pvpSend(p);
+  if (reason !== 'resync') pv.lastSync = { p, sent };
+}
+
+/** A peer came back: if our state is authoritative (not waiting for a shot result), send it. */
+function pvpSendResyncIfIdle() {
+  const pv = state.pvp;
+  if (!pv || pv.remoteShot || !pv.synced) return;
+  pvpSendSync('resync');
+}
+
+/** Called from doShot: returns the launch parameters and the rng; the local shooter also announces the shot. */
+function pvpPrepareShot(remote) {
+  const pv = state.pvp;
+  if (remote) {
+    pv.shotBy = 'peer';
+    state.power = remote.power;
+    state.tip = { ...remote.tip };
+    panel.spinPad.set(state.tip, true);
+    return {
+      strikeParams: { aimDir: remote.aimDir, power: remote.power, tip: remote.tip, elevationDeg: remote.elev },
+      simRng: mulberry32(remote.seed),
+    };
+  }
+  pv.seq += 1;
+  pv.shotBy = 'me';
+  const seed = newSeed();
+  const strikeParams = {
+    aimDir: { x: info.aimDir.x, y: info.aimDir.y },
+    power: state.power,
+    tip: { x: state.tip.x, y: state.tip.y },
+    elevationDeg: elevation(info.aimDir), // the effective elevation is sent as-is so the other device does not re-derive it
+  };
+  pvpSend({
+    k: 'shot',
+    seq: pv.seq,
+    seed,
+    balls: packBalls(state.balls, { withQuat: true }),
+    aimDir: strikeParams.aimDir,
+    power: strikeParams.power,
+    tip: strikeParams.tip,
+    elev: strikeParams.elevationDeg,
+  });
+  return { strikeParams, simRng: mulberry32(seed) };
+}
+
+/** Throttled (100 ms) cue/power/tip/cue-ball broadcast while it is my turn to aim. */
+function pvpTickAim(now) {
+  const pv = state.pvp;
+  if (!pv || !pvpMyTurn() || state.phase !== 'aim' || strokePending) return;
+  const cue = ball(0);
+  if (!cue) return;
+  const key = [
+    state.aimAngle.toFixed(2),
+    state.power.toFixed(3),
+    state.tip.x.toFixed(3),
+    state.tip.y.toFixed(3),
+    Math.round(state.elevation),
+    cue.pos.x.toFixed(1),
+    cue.pos.y.toFixed(1),
+  ].join('|');
+  if (key === pv.lastAimKey) return;
+  const wait = 100 - (now - pv.lastAimAt);
+  if (wait > 0) {
+    if (!pv.aimTimer) {
+      pv.aimTimer = setTimeout(() => {
+        pv.aimTimer = 0;
+        if (state.pvp === pv) pvpTickAim(performance.now());
+      }, wait + 5);
+    }
+    return;
+  }
+  pv.lastAimAt = now;
+  pv.lastAimKey = key;
+  pvpSend({
+    k: 'aim',
+    angle: state.aimAngle,
+    power: state.power,
+    tip: { x: state.tip.x, y: state.tip.y },
+    elev: state.elevation,
+    cue: { x: cue.pos.x, y: cue.pos.y },
+  });
+}
+
+/* ---- receiving */
+
+const pvpBusy = () => !!state.pvp && !!state.pvp.remoteShot;
+
+function pvpHandle(p) {
+  const pv = state.pvp;
+  if (!pv) return;
+  switch (p.k) {
+    case 'aim': {
+      if (pvpBusy() || state.phase !== 'aim' || pv.rackPending || !pv.synced || pv.ended || state.bot.turn === pv.myWho) return;
+      state.aimMode = 'manual';
+      state.aimAngle = normAngle(p.angle);
+      state.power = p.power;
+      state.tip = { x: p.tip.x, y: p.tip.y };
+      state.botElevation = p.elev;
+      const cue = ball(0);
+      // keep the sender's exact position (a ball resting on a cushion can sit a hair past the clamp limit); only reject nonsense
+      if (cue && p.cue.x >= 0 && p.cue.x <= geo.W && p.cue.y >= 0 && p.cue.y <= geo.H) cue.pos = { x: p.cue.x, y: p.cue.y };
+      panel.spinPad.set(state.tip, true);
+      syncControls();
+      invalidate({ pred: false });
+      break;
+    }
+    case 'shot': {
+      if (pv.ended) return;
+      if (pvpBusy() || state.phase !== 'aim') {
+        pv.queue.push(p); // arrived while the previous remote shot is still being animated
+        return;
+      }
+      pv.seq = Math.max(pv.seq, p.seq);
+      pv.remoteShot = { seq: p.seq };
+      state.balls = unpackBalls(p.balls, createBall);
+      state.aimMode = 'manual';
+      doShot(p);
+      break;
+    }
+    case 'sync': {
+      if (pv.ended && p.reason === 'result') return;
+      const rs = pv.remoteShot;
+      if (rs && (p.reason === 'result' ? p.seq === rs.seq : p.reason === 'resync' && p.seq >= rs.seq)) {
+        // the result of the shot being animated here (a resync also settles it: the shooter's state is newer)
+        pvpGate.syncArrived({ ...p, seq: rs.seq });
+        return;
+      }
+      if (rs) {
+        pv.queue.push(p);
+        return;
+      }
+      if (p.seq < pv.seq) return; // stale
+      if (p.reason === 'result') {
+        if (p.seq <= pv.appliedResultSeq) return; // duplicate (re-sent after a reconnect)
+        pv.appliedResultSeq = p.seq;
+      }
+      pvpApplySync(p);
+      break;
+    }
+    case 'rematch': {
+      pv.rematch.peer = p.accept;
+      if (!p.accept) {
+        pv.rematch.me = false;
+        if (state.bot.matchOver) panel.setMatchWinWait('Đối thủ không muốn chơi lại.', false);
+      } else if (state.bot.matchOver && !pv.rematch.me) {
+        panel.toast('Đối thủ muốn chơi lại', 'ok');
+        panel.setMatchWinWait('Đối thủ muốn chơi lại – bấm "Chơi lại" để đồng ý.', false);
+      }
+      pvpMaybeStartRematch();
+      break;
+    }
+    case 'resign':
+      if (!state.bot.matchOver) pvpEndByResign(otherWho(pv.myWho));
+      break;
+    default:
+      break;
+  }
+}
+
+function pvpDrainQueue() {
+  const pv = state.pvp;
+  if (!pv) return;
+  const items = pv.queue.splice(0);
+  for (const p of items) pvpHandle(p);
+}
+
+/** The animation of the opponent's shot finished on this device. */
+function pvpRemoteShotDone() {
+  const pv = state.pvp;
+  const seq = pv.remoteShot ? pv.remoteShot.seq : pv.seq;
+  if (pvpGate.animationDone(seq)) return; // the sync was already here: pvpOnGateReady applied it
+  pv.waitingSync = true;
+  pv.waitingSyncSlow = false;
+  clearTimeout(pv.syncTimer);
+  pv.syncTimer = setTimeout(() => {
+    if (!state.pvp || !state.pvp.waitingSync) return;
+    state.pvp.waitingSyncSlow = true;
+    pvpUpdateHud();
+    panel.toast('Đang đồng bộ…', 'warn');
+  }, PVP_SYNC_SLOW_MS);
+  syncControls();
+}
+
+function pvpOnGateReady(sync) {
+  const pv = state.pvp;
+  if (!pv) return;
+  pv.waitingSync = false;
+  pv.waitingSyncSlow = false;
+  clearTimeout(pv.syncTimer);
+  pv.remoteShot = null;
+  pv.shotBy = null;
+  if (sync.reason === 'result') pv.appliedResultSeq = Math.max(pv.appliedResultSeq, sync.seq);
+  if (pv.ended) return;
+  pvpApplySync(sync);
+  pvpDrainQueue();
+}
+
+/** Put the shooter's snapshot in place: balls, potted list, match state. */
+function pvpApplySync(sync) {
+  const pv = state.pvp;
+  if (!pv) return;
+  pv.synced = true;
+  pv.seq = Math.max(pv.seq, sync.seq);
+  state.balls = unpackBalls(sync.balls, createBall);
+  state.pottedIds = [...sync.potted];
+  applyMatch(state, sync.match);
+  pv.rackPending = sync.match.rackPending && !sync.match.matchOver;
+  state.bot.pendingRack = pv.rackPending ? sync.match.breaker : null;
+  if (sync.reason === 'rack' && !sync.match.matchOver) {
+    pv.ended = null;
+    matchEndTracked = false;
+  }
+  // reset anything left over from the previous shot
+  state.sim = null;
+  state.phase = 'aim';
+  dropAnims = [];
+  seenDropCount = 0;
+  seenOffTableCount = 0;
+  seenContactCount = 0;
+  seenCushionCount = 0;
+  timeScale = 1;
+  state.preShot = null;
+  state.pocket = null;
+  state.aimOffset = 0;
+  state.power = sync.reason === 'rack' ? 0.78 : 0.3;
+  state.tip = { x: 0, y: 0 };
+  panel.spinPad.set(state.tip, true);
+  state.elevation = DEFAULT_ELEVATION_DEG;
+  state.botElevation = null;
+  state.botLastShotKind = null;
+  state.aimMode = 'manual';
+  pvpAimAtTarget();
+  if (sync.toast) panel.toast(sync.toast, '');
+  if (sync.match.matchOver) {
+    pv.rematch = { me: false, peer: false };
+    pvpShowMatchOver();
+  } else {
+    panel.setMatchWin(false);
+    pv.rematch = { me: false, peer: false };
+  }
+  syncControls();
+  invalidate();
+  // host: the opponent won a rack, so the next layout is made here
+  if (pv.seat === 1 && pv.rackPending) {
+    clearBotTimers();
+    const breaker = state.bot.breaker;
+    addBotTimer(() => startBotRack(breaker), PVP_RACK_DELAY);
+  }
+}
+
+/** Point the cue at the first legal target of whoever is on turn (only meaningful on my turn). */
+function pvpAimAtTarget() {
+  const who = state.bot.turn;
+  let tid = state.targetId && ball(state.targetId) ? state.targetId : null;
+  if (tid === null) {
+    if (state.bot.game === '8ball') {
+      const ids = eightBallTargetIds(state.balls, state.bot.groups[who]);
+      tid = ids.length ? ids[0] : null;
+    } else {
+      tid = lowestObjectId();
+    }
+    state.targetId = tid;
+  }
+  const cue = ball(0);
+  const tgt = tid ? ball(tid) : null;
+  if (cue && tgt) {
+    state.aimAngle = normAngle(Math.round(deg(Math.atan2(tgt.pos.y - cue.pos.y, tgt.pos.x - cue.pos.x)) * 100) / 100);
+  }
+}
+
+/* ---- end of match: win modal, rematch, resignation */
+
+function pvpShowMatchOver({ winner = null, desc = '' } = {}) {
+  const pv = state.pvp;
+  const b = state.bot;
+  let w = winner;
+  if (!w) w = b.raceTo > 0 ? (b.scorePlayer >= b.raceTo ? 'player' : 'bot') : b.scorePlayer >= b.scoreBot ? 'player' : 'bot';
+  const winnerName = botNameOf(w);
+  trackMatchEnd(w, pv && pv.ended ? 'resign' : 'race');
+  panel.setMatchWin(true, {
+    title: `🏆 ${winnerName} Thắng Chung Cuộc!`,
+    desc: desc || `${winnerName} đã xuất sắc chạm mốc ${b.raceTo} ván thắng trước!`,
+    name1: botNameOf('player'),
+    name2: botNameOf('bot'),
+    score1: b.scorePlayer,
+    score2: b.scoreBot,
+    pvp: true,
+  });
+  panel.setTurnLocked(true);
+  if (pv.rematch.me) panel.setMatchWinWait('Đang chờ đối thủ đồng ý…', true);
+  else if (pv.rematch.peer) panel.setMatchWinWait('Đối thủ muốn chơi lại – bấm "Chơi lại" để đồng ý.', false);
+}
+
+function pvpRematch() {
+  const pv = state.pvp;
+  if (!pv || !state.bot.matchOver) return;
+  pv.rematch.me = true;
+  pvpSend({ k: 'rematch', accept: true });
+  panel.setMatchWinWait(pv.rematch.peer ? 'Đang bắt đầu trận mới…' : 'Đang chờ đối thủ đồng ý…', true);
+  pvpMaybeStartRematch();
+}
+
+/** Host only: both players agreed, reset the score and rack the first game. */
+function pvpMaybeStartRematch() {
+  const pv = state.pvp;
+  if (!pv || pv.seat !== 1 || !state.bot.matchOver || !(pv.rematch.me && pv.rematch.peer)) return;
+  pv.rematch = { me: false, peer: false };
+  pv.ended = null;
+  state.bot.scorePlayer = 0;
+  state.bot.scoreBot = 0;
+  state.bot.rack = 1;
+  state.bot.matchOver = false;
+  state.bot.breaker = 'player';
+  panel.setMatchWin(false);
+  startBotRack('player'); // sends the new layout (reason 'rack')
+}
+
+function pvpResign() {
+  const pv = state.pvp;
+  if (!pv || state.bot.matchOver || pv.ended) return;
+  if (typeof window.confirm === 'function' && !window.confirm('Xin thua trận này?')) return;
+  pvpSend({ k: 'resign' });
+  pvpEndByResign(pv.myWho);
+}
+
+function pvpEndByResign(loser) {
+  const pv = state.pvp;
+  if (!pv) return;
+  clearBotTimers();
+  pv.ended = { loser };
+  pv.rackPending = false;
+  pv.rematch = { me: false, peer: false };
+  state.bot.pendingRack = null;
+  state.bot.matchOver = true;
+  const winner = otherWho(loser);
+  state.bot.statusText = `🏳️ ${botNameOf(loser)} đã xin thua. ${botNameOf(winner)} thắng trận!`;
+  pvpShowMatchOver({ winner, desc: `${botNameOf(loser)} đã xin thua.` });
+  syncControls();
+  invalidate();
+}
+
 /* ------------------------------------------------------------------ modes + drills */
 
 function setMode(mode, opts = {}) {
@@ -1848,6 +2793,7 @@ function setMode(mode, opts = {}) {
     return;
   }
   if (mode === state.mode && !opts.forceReset) return;
+  analytics.track('practice_start', { drill: mode });
   clearBotTimers();
   if (state.mode === 'free') state.freeBackup = snapshot();
   state.appMode = 'practice';
@@ -2132,11 +3078,27 @@ const panel = createPanel({
   },
   onMode: setMode,
   onAppMode: (app) => {
+    if (app === 'pvp') {
+      openPvpLobby();
+      return;
+    }
+    if (state.pvp) {
+      if (!state.bot.matchOver && typeof window.confirm === 'function' && !window.confirm('Rời phòng online? Trận đang chơi sẽ kết thúc.')) return;
+      leavePvpIfNeeded();
+    }
     if (app === 'bvb') enterBvbMode();
     else if (app === 'hero') enterBotMode('hero');
     else if (app === 'bot') enterBotMode();
     else enterPracticeMode(state.practiceMode);
   },
+  onPvpCreate: (o) => pvpStartLobby('create', o),
+  onPvpJoin: (o) => pvpStartLobby('join', o),
+  onPvpCancel: pvpCancelLobby,
+  onPvpCopy: pvpCopyLink,
+  onPvpCopyCode: pvpCopyCode,
+  onPvpResign: pvpResign,
+  onPvpRematch: pvpRematch,
+  onPvpLeave: (o) => pvpLeave({ confirmFirst: !!(o && o.confirm) }),
   onStartBot: (diff, game, raceTo) => enterBotMode(diff, game, raceTo),
   onStartBvb: (opts) => enterBvbMode(opts),
   onStartPractice: () => enterPracticeMode('free'),
@@ -2281,7 +3243,8 @@ const panel = createPanel({
 });
 
 const settings = createSettings({
-  canChange: isPlayerReady,
+  canChange: () => isPlayerReady() && !isPvpMode(),
+  blockedMsg: () => (isPvpMode() ? 'Thiết bị cố định khi chơi online' : 'Đợi bi dừng rồi hãy đổi thiết bị'),
   onChange: onEquipmentChange,
   toast: panel.toast,
 });
@@ -2499,6 +3462,16 @@ window.addEventListener('resize', () => {
 
 // share link in the hash
 function loadFromHash() {
+  const room = parseRoomHash(location.hash);
+  if (room) {
+    // invite link: open the lobby with the room code filled in
+    if (!state.pvp) {
+      state.lobbyOpen = true;
+      panel.setLobbyOpen(true);
+      panel.focusPvpLobby(room);
+    }
+    return true;
+  }
   const d = decodeState(location.hash);
   if (!d) return false;
   clearBotTimers();
@@ -2533,7 +3506,7 @@ function loadFromHash() {
   return true;
 }
 window.addEventListener('hashchange', () => {
-  if (isAimReady()) loadFromHash();
+  if (isAimReady() && !isPvpMode()) loadFromHash();
 });
 
 // PWA (sw.js stays at the site root so its scope covers the whole app)
@@ -2781,11 +3754,32 @@ geo = buildTable(eq.table);
 renderer.setTable(geo, eq.table);
 panel.spinPad.setMiscueLimit(eq.cue.miscueLimit);
 defaultLayout();
-if (!loadFromHash()) {
+let roomFromHash = parseRoomHash(location.hash);
+if (roomFromHash) {
+  const saved = loadSession();
+  if (saved && saved.code === roomFromHash) {
+    // reload of a tab that joined through this invite link: resume the match instead of asking to join again
+    roomFromHash = null;
+    try {
+      history.replaceState(null, '', location.pathname + location.search);
+    } catch (e) {
+      /* ignore */
+    }
+  } else {
+    try {
+      sessionStorage.removeItem(SESSION_KEY); // an invite link to another room replaces any older session of this tab
+    } catch (e) {
+      /* ignore */
+    }
+  }
+}
+const resumingRoom = !roomFromHash && pvpTryResume();
+if (roomFromHash || resumingRoom || !loadFromHash()) {
   panel.setAppMode('practice');
   panel.refreshTray((id) => !!ball(id));
   state.lobbyOpen = true;
   panel.setLobbyOpen(true);
+  if (roomFromHash) panel.focusPvpLobby(roomFromHash);
   syncPottedUi();
 }
 syncControls();

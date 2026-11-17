@@ -1,8 +1,8 @@
-# Bida 9 bi – Tập luyện
+# MimePool – Bida 9 bi & 8 bi
 
-Ứng dụng web (PWA) giúp tập bida 9 bi: đặt bi cái và bi mục tiêu, xem **bi ma (ghost ball)**, **góc cắt**, **độ dày**,
+Ứng dụng web (PWA) giúp tập bida 9 bi (có thêm chế độ **1 vs 1 Online**, xem mục bên dưới): đặt bi cái và bi mục tiêu, xem **bi ma (ghost ball)**, **góc cắt**, **độ dày**,
 đường đi dự đoán, rồi đánh thử với lực và điểm chạm (spin) tùy chọn. Viết bằng JavaScript thuần (ES modules),
-không cần build, không có thư viện ngoài. Giao diện ưu tiên điện thoại (bàn xoay dọc khi màn hình dọc), dùng được trên máy tính.
+không cần build, không có thư viện ngoài ở phía trình duyệt (chỉ phần máy chủ của chế độ online dùng đúng một thư viện: `ws`). Giao diện ưu tiên điện thoại (bàn xoay dọc khi màn hình dọc), dùng được trên máy tính.
 
 ## Chạy trên máy
 
@@ -15,6 +15,8 @@ python -m http.server 8765
 
 Mở `http://localhost:8765`.
 
+Chế độ **1 vs 1 Online** cần máy chủ Node (xem mục "1 vs 1 Online" bên dưới); các chế độ còn lại vẫn chạy với máy chủ tĩnh như trên.
+
 ### Mở trên điện thoại (cùng Wi-Fi)
 
 1. Tìm IP LAN của máy tính (`ipconfig` trên Windows, ví dụ `192.168.1.20`).
@@ -25,7 +27,7 @@ Lưu ý: Service worker / "Thêm vào màn hình chính" chỉ hoạt động qu
 
 ## Triển khai
 
-Đây là site tĩnh, chỉ cần đưa toàn bộ thư mục (trừ `tests/`, `docs/`) lên:
+Nếu **không** dùng chế độ online, đây là site tĩnh, chỉ cần đưa toàn bộ thư mục (trừ `tests/`, `docs/`, `server/`) lên (cách triển khai có máy chủ online nằm ở mục "1 vs 1 Online"):
 
 - **GitHub Pages**: đẩy lên repo, vào *Settings → Pages*, chọn nhánh và thư mục gốc. Mọi đường dẫn đều tương đối nên chạy được trong thư mục con.
 - **Netlify**: kéo-thả thư mục vào Netlify Drop, hoặc kết nối repo (build command để trống, publish directory là `.`).
@@ -37,14 +39,17 @@ Khi sửa file, tăng `CACHE_VERSION` trong `sw.js` để người dùng nhận 
 ```
 index.html          giao diện (giữ ở thư mục gốc)
 sw.js               service worker (phải ở thư mục gốc để có scope toàn site)
-package.json        lệnh npm test
+package.json        lệnh npm start / npm test (dependency duy nhất: ws, chỉ cho máy chủ)
+.env.example        biến môi trường của máy chủ (PORT, ALLOWED_ORIGINS, GA_MEASUREMENT_ID)
 assets/             style.css, icon.svg, manifest.webmanifest
+server/             index.mjs (HTTP tĩnh + WebSocket /ws), rooms.mjs (quản lý phòng, thuần)
+src/net/            protocol.js (giao thức, dùng chung client + server), client.js, config.js
 src/app.js          trạng thái + nối các phần với nhau
 src/core/           vec, table, geometry, physics, aim-solver, equipment (thuần, không DOM)
 src/ui/             render, input, panel, settings, keyboard, render3d (three.js), view3d-math
 assets/vendor/three three.js r164 (MIT)
-src/features/       drills, share
-tests/core/         *.test.mjs (node --test)
+src/features/       drills, share, bot, pvp (hàm thuần cho chế độ online)
+tests/              core/, net/, server/, features/: *.test.mjs (node --test)
 docs/               physics-notes.md
 ```
 
@@ -116,13 +121,53 @@ Bấm nút trên thanh đầu trang (ví dụ "Bàn: Club 9ft · Gậy: Fury TK-
 - Mọi thông số là **ước lượng để luyện tập**, không phải số đo thực tế. Thông số Fury TK-03 lấy từ cửa hàng bán lẻ, chưa xác minh với hãng.
 - Thông tin cú đánh hiện "Bù squirt: x,x°" khi có effet; đường cam nét đứt là đường bi cái thực tế sau squirt, đường trắng là đường ngắm.
 
+## 1 vs 1 Online
+
+Hai người chơi trên hai thiết bị, phòng riêng bằng mã 5 ký tự hoặc liên kết mời, luật 9 bi hoặc 8 bi, chọn "Chạm" 1–11 ván.
+
+**Chạy máy chủ** (Node >= 20, cần `npm install` một lần để cài `ws`):
+
+```bash
+npm install
+npm start            # http://localhost:28787  (phục vụ cả web lẫn WebSocket /ws)
+```
+
+Mở `http://localhost:28787` trên hai thiết bị (hoặc hai tab), chọn **1 vs 1 Online** ở sảnh: một bên **Tạo phòng** rồi gửi mã / bấm **Sao chép liên kết** (liên kết dạng `…/#room=ABCDE`), bên kia nhập mã và bấm **Vào phòng**.
+
+**Biến môi trường** (xem `.env.example`; với Node >= 20.6 có thể nạp bằng `node --env-file=.env server/index.mjs`):
+
+| Biến | Ý nghĩa | Mặc định |
+|---|---|---|
+| `PORT` | Cổng máy chủ | `28787` |
+| `ALLOWED_ORIGINS` | Danh sách `Origin` được phép mở WebSocket, cách nhau bằng dấu phẩy (để trống = cho tất cả) | trống |
+| `GA_MEASUREMENT_ID` | Mã GA4 (`G-…`) hoặc Tag Manager (`GTM-…`) để bật thống kê; server điền vào trang khi phục vụ | trống (tắt) |
+| `HOST` | Địa chỉ lắng nghe | `0.0.0.0` |
+
+`GET /healthz` trả `ok` để kiểm tra sống. Máy chủ chỉ phục vụ `index.html`, `sw.js`, `assets/`, `src/` (không phục vụ `server/`, `tests/`, `docs/`, `package.json`, tệp ẩn).
+
+**Triển khai** (hai cách):
+
+1. *Một dịch vụ Node phục vụ cả hai* (đơn giản nhất): đưa cả thư mục lên dịch vụ chạy Node (Render, Railway, Fly.io, VPS...), lệnh chạy `npm start`, đặt `PORT` nếu nền tảng yêu cầu. Trình duyệt tự dùng cùng origin (`wss://` khi trang là HTTPS).
+2. *Web tĩnh + máy chủ riêng*: giữ nguyên site tĩnh (GitHub Pages, Netlify...) và chạy `server/index.mjs` ở nơi khác. Trên máy chơi mở trang với `?server=wss://may-chu.example.com/ws` (hoặc lưu `localStorage['bida9-server']`); nên đặt `ALLOWED_ORIGINS` bằng địa chỉ site tĩnh.
+
+**Cách hoạt động.** Người đang có lượt là "nguồn sự thật": khi đánh, máy đó gửi vị trí các bi + thông số cú đánh + một hạt giống ngẫu nhiên; cả hai máy tự chạy cùng một mô phỏng. Chỉ máy người đánh chấm luật và đổi lượt, rồi gửi ảnh chụp đầy đủ (`sync`) để máy kia áp lại sau khi hoạt ảnh kết thúc, nên hai bên luôn khớp tỉ số và vị trí bi. Chủ phòng là người xếp bi ván mới. Máy chủ chỉ chuyển tiếp tin nhắn, không mô phỏng. Trong trận online cả hai dùng cố định bàn Club 9ft + Gậy thường (nút Thiết bị bị khóa, thiết bị đã lưu của bạn không bị ghi đè).
+
+Rớt mạng: máy tự kết nối lại (1 s, 2 s, 4 s, 8 s… tối đa 60 s) và vào lại đúng ghế bằng mã phiên lưu trong `sessionStorage` của tab; máy kia hiện "Đối thủ mất kết nối – chờ 60s" rồi gửi lại trạng thái trận. Tải lại trang (F5) giữa trận cũng vào lại được.
+
+**Giới hạn đã biết.**
+
+- Máy chủ không tự mô phỏng và không kiểm tra luật: bên đánh có thể gian lận (sửa mã máy mình). Bản này chỉ dành cho chơi với bạn bè; chưa có tài khoản, xếp hạng, ghép cặp ngẫu nhiên, chat hay đồng hồ đánh.
+- Hai máy tự mô phỏng nên kết quả có thể lệch rất nhỏ giữa các trình duyệt/thiết bị khác nhau (hàm toán học `sin`, `exp`... có thể khác ở bit cuối); ảnh chụp `sync` sau mỗi cú đánh sửa lại cho khớp.
+- Đóng hẳn tab rồi mở tab mới thì mất mã phiên (`sessionStorage` theo từng tab) và không vào lại được ghế cũ; khôi phục tab vừa đóng hoặc tải lại trang thì được. Phòng còn giữ ghế 60 s sau khi một bên rớt mạng, quá hạn thì đóng phòng. Nếu cả hai người cùng tải lại trang một lúc thì không còn bên nào giữ trạng thái trận để đồng bộ.
+- Phòng không hoạt động quá 30 phút bị dọn.
+
 ## Kiểm thử
 
 ```bash
 npm test
 ```
 
-(chạy `node --test "tests/core/*.test.mjs"`; với Node 24, `node --test tests/` không chạy được vì coi `tests` là một module.)
+(chạy `node --test "tests/**/*.test.mjs"`: `tests/core`, `tests/net`, `tests/server` (có bật máy chủ thật ở cổng ngẫu nhiên), `tests/features`; với Node 24, `node --test tests/` không chạy được vì coi `tests` là một module.)
 
 ## Giới hạn của mô hình vật lý
 
@@ -134,3 +179,26 @@ npm test
 - **Lỗ đơn giản hóa**: khe hở và bán kính hút suy ra từ độ rộng miệng lỗ, không có má lỗ (jaw) cong; bi lăn sát băng qua miệng lỗ có thể không rơi.
 - Đường "lăn ~30°" chỉ là **xấp xỉ** của quy tắc 30°.
 - Ma sát trượt/lăn là hằng số theo bàn, không tính độ mòn vải hay nhiệt độ. Mọi thông số bàn/gậy là ước lượng. Xem `docs/physics-notes.md`.
+
+## Thống kê người dùng (Google Tag Manager / GA4)
+
+Mã **không nằm trong repo**: đặt biến môi trường `GA_MEASUREMENT_ID` cho server (tệp `.env` trên máy chủ, xem `.env.example`).
+Khi phục vụ `index.html`, server điền mã vào thẻ `<meta name="ga-measurement-id">`; để trống = tắt. Nhận hai loại:
+
+- `GTM-XXXXXXX`: container Google Tag Manager. App đẩy sự kiện vào `dataLayer` dạng `{ event: 'match_end', ... }`;
+  **trong container phải tự tạo thẻ GA4 và trigger "Custom Event"** cho từng tên sự kiện thì dữ liệu mới tới GA4.
+- `G-XXXXXXXXXX`: mã đo lường GA4, sự kiện gửi thẳng tới GA4 qua gtag.js, không cần cấu hình thêm.
+
+Mã vẫn hiện trong mã nguồn trang của site đang chạy (mọi mã GA đều vậy); biến môi trường chỉ giữ nó khỏi repo.
+Nếu chỉ host tĩnh (không có server Node) thì thống kê tắt. Thống kê chỉ chạy ở bản release (không chạy ở `localhost` hay khi có `?dev=1`).
+
+Các sự kiện app gửi, **không kèm tên người chơi hay mã phòng**:
+
+| Sự kiện | Tham số |
+|---|---|
+| `match_start` | `mode` (bot / pvp / bvb), `game`, `race_to`, `difficulty` (chỉ khi đấu Bot) |
+| `match_end` | như trên + `result` (win / lose / watched), `reason` (race / resign), `score_winner`, `score_loser`, `racks` |
+| `room_create`, `room_join` | `game`, `race_to` |
+| `practice_start` | `drill` (free / thickness / position / squirt) |
+
+Mã nguồn: `src/features/analytics.js`. Trận 1 vs 1 được mỗi máy báo một lần, theo góc nhìn của máy đó.
