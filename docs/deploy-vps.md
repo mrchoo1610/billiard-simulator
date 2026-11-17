@@ -1,86 +1,71 @@
-# Deploy lên VPS bằng Docker + GitHub Actions + Cloudflare Tunnel
+# Deploy lên VPS bằng Docker + GitHub Actions (Self-Hosted Runner) + Cloudflare Tunnel
 
 Workflow `.github/workflows/ci-deploy.yml`:
 
-1. `test`: `npm ci` + `npm test` (mọi push và PR).
-2. `image`: build image Docker, chạy thử container và gọi `/healthz`; trên `main` thì đẩy lên GHCR
-   (`ghcr.io/<owner>/<repo>:<commit-sha>` và `:latest`).
-3. `deploy` (chỉ `main`, chỉ khi biến `DEPLOY_ENABLED=true`): chép `docker-compose.yml` lên VPS, SSH vào chạy
-   `docker compose pull app` + `docker compose up -d app`, rồi gọi `/healthz` qua hostname của tunnel.
+1. `test`: `npm ci` + `npm test` (chạy trên GitHub Cloud `ubuntu-latest`).
+2. `image`: build image Docker, chạy thử container và gọi `/healthz`; sau đó đẩy lên GHCR
+   (`ghcr.io/<owner>/<repo>:<commit-sha>` và `:latest`) (chạy trên `ubuntu-latest`).
+3. `deploy`: chạy trực tiếp trên **Self-Hosted Runner** đặt trên server VPS (`runs-on: [self-hosted, Linux]`),
+   tự kéo image từ GHCR, cập nhật `docker-compose.yml`, khởi động lại container và kiểm tra `/healthz`.
 
-Web và WebSocket đi qua **Cloudflare Tunnel**: Cloudflare lo HTTPS và DNS của hostname, máy chủ không mở cổng web ra ngoài.
+Web và WebSocket đi qua **Cloudflare Tunnel**: Cloudflare lo HTTPS và DNS của hostname, máy chủ không cần mở cổng web hoặc cổng SSH ra ngoài Internet cho GitHub Actions.
 
-Trạng thái: image và compose đã build và chạy thử trên máy phát triển; workflow và các bước trên VPS **chưa chạy thử
-trên GitHub/VPS thật**. Lệnh cài Docker và cấu hình `cloudflared` viết theo trí nhớ về tài liệu chính thức; hãy đối chiếu trước khi chạy.
-
-## Cổng sử dụng (đều khác mặc định)
+## Cổng sử dụng
 
 | Dùng cho | Cổng | Nghe ở đâu | Ghi chú |
 |---|---|---|---|
 | App (web + `/ws`) | `28787` | `127.0.0.1` của máy chủ | Đổi bằng `PORT` trong `.env`; nhớ sửa cả địa chỉ đích của tunnel |
-| SSH cho deploy | `22022` (gợi ý) | công khai | Bạn tự đổi trong `sshd`; đặt secret `DEPLOY_PORT` cho khớp |
+| SSH quản trị | `22` hoặc tùy chọn | công khai/VPN | Chỉ dùng cho quản trị viên, CI/CD không cần SSH |
 | Web 80 / 443 | không mở | – | Tunnel chỉ tạo kết nối đi ra |
 
-## 1. Chuẩn bị một lần trên VPS
+## 1. Chuẩn bị trên VPS
 
 1. Cài Docker Engine kèm plugin compose theo tài liệu chính thức: https://docs.docker.com/engine/install/
-2. Trên máy của bạn, tạo cặp khóa chỉ dùng cho deploy (không đặt mật khẩu):
+2. Cài đặt GitHub Actions Self-Hosted Runner trên VPS:
+   - Vào GitHub Repo: **Settings → Actions → Runners → New runner**.
+   - Chọn Linux / x64 và làm theo các bước tải, cấu hình và khởi chạy runner service.
+   - Đảm bảo user chạy runner có quyền chạy Docker:
+     ```bash
+     sudo usermod -aG docker $USER
+     # Nếu runner đã chạy dạng systemd service, khởi động lại service:
+     sudo ./svc.sh restart # hoặc sudo systemctl restart actions.runner.*
+     ```
+3. Tạo thư mục chứa ứng dụng `/srv/bida` và file cấu hình môi trường `.env`:
    ```bash
-   ssh-keygen -t ed25519 -f bida_deploy -C "bida-deploy" -N ""
-   ```
-3. Chép `scripts/deploy/server-setup.sh` lên VPS rồi chạy với **khóa công khai** (`bida_deploy.pub`):
-   ```bash
-   sudo bash server-setup.sh "ssh-ed25519 AAAA... bida-deploy"
-   ```
-   Script tạo user `bida` (thuộc nhóm `docker`), thư mục `/srv/bida` và tệp `/srv/bida/.env`.
-   Lưu ý: thành viên nhóm `docker` có quyền tương đương root trên máy chủ, nên khóa deploy phải được giữ kín.
-4. Sửa `/srv/bida/.env`:
-   ```
+   sudo mkdir -p /srv/bida
+   sudo chown -R $USER:$USER /srv/bida
+   cat > /srv/bida/.env <<'EOF'
    PORT=28787
    ALLOWED_ORIGINS=https://hostname-cua-tunnel
-   GA_MEASUREMENT_ID=G-XXXXXXXXXX
+   GA_MEASUREMENT_ID=
    TUNNEL_TOKEN=
+   EOF
+   chmod 600 /srv/bida/.env
    ```
-   `GA_MEASUREMENT_ID` là mã GA4 (hoặc `GTM-…`); để trống thì tắt thống kê. Mã không nằm trong repo.
-5. Cloudflare Tunnel, chọn một trong hai:
+4. Cloudflare Tunnel, chọn một trong hai:
    - **cloudflared đang chạy sẵn trên máy chủ** (ngoài Docker): trỏ Public Hostname về `http://127.0.0.1:28787`
-     (trên dashboard, hoặc bằng mẫu `scripts/deploy/cloudflared-config.yml`).
-   - **cloudflared chạy bằng container của compose này**: điền `TUNNEL_TOKEN` vào `.env`, trỏ Public Hostname trên
-     dashboard về `http://app:28787`, rồi sau lần deploy đầu chạy một lần:
+     (trên dashboard Cloudflare Zero Trust, hoặc bằng mẫu `scripts/deploy/cloudflared-config.yml`).
+   - **cloudflared chạy bằng container của compose**: điền `TUNNEL_TOKEN` vào `.env`, trỏ Public Hostname trên
+     dashboard về `http://app:28787`, rồi chạy:
      ```bash
      cd /srv/bida && IMAGE=$(cat current-image.txt) docker compose --profile tunnel up -d
      ```
-6. Đổi cổng SSH sang `22022` (tùy chọn): sửa `Port 22022` trong `/etc/ssh/sshd_config`, mở cổng mới trên tường lửa
-   **trước**, khởi động lại `sshd`, và thử đăng nhập bằng cổng mới ở một phiên khác trước khi đóng phiên hiện tại.
-7. Tường lửa: chỉ mở cổng SSH; không mở 80, 443 hay 28787:
-   ```bash
-   sudo ufw allow 22022/tcp && sudo ufw enable
-   ```
 
-## 2. Cấu hình trên GitHub
+## 2. Cấu hình trên GitHub (Tùy chọn)
 
 Settings → Secrets and variables → Actions.
 
-Secrets:
+**Không cần Secrets SSH** (vì runner chạy trực tiếp trên server).
 
-| Tên | Giá trị |
-|---|---|
-| `DEPLOY_HOST` | IP của VPS (SSH đi thẳng vào VPS, không qua tunnel) |
-| `DEPLOY_USER` | `bida` |
-| `DEPLOY_SSH_KEY` | Toàn bộ nội dung tệp khóa riêng `bida_deploy` |
-| `DEPLOY_KNOWN_HOSTS` | Kết quả của `ssh-keyscan -p 22022 -H <IP>` (kiểm tra dấu vân tay trước khi dán) |
-| `DEPLOY_PORT` | `22022` (bỏ trống thì workflow dùng 22) |
+Variables (Tùy chọn):
 
-Variables:
+| Tên | Giá trị mặc định | Ghi chú |
+|---|---|---|
+| `DEPLOY_PATH` | `/srv/bida` | Đường dẫn thư mục chứa compose và `.env` trên VPS |
+| `DEPLOY_URL` | `http://127.0.0.1:28787` | Domain tunnel để test health check sau deploy |
+| `DEPLOY_ENABLED` | `true` | Đặt `false` nếu muốn tạm dừng bước deploy |
 
-| Tên | Giá trị |
-|---|---|
-| `DEPLOY_PATH` | `/srv/bida` |
-| `DEPLOY_URL` | `https://hostname-cua-tunnel` |
-| `DEPLOY_ENABLED` | `true` (chưa đặt thì workflow chỉ test và build image, không deploy) |
-
-Không cần tạo token riêng cho GHCR: workflow dùng `GITHUB_TOKEN` của chính lần chạy để đẩy image, và chuyển token đó
-qua SSH cho máy chủ đăng nhập GHCR trong lúc kéo image rồi đăng xuất ngay.
+Không cần tạo token riêng cho GHCR: workflow dùng `GITHUB_TOKEN` của chính lần chạy để đẩy image từ job `image` và kéo image trong job `deploy`.
 
 ## 3. Vận hành
 
