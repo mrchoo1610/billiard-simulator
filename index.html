@@ -138,9 +138,82 @@
           </div>
         </div>
       </div>
+
+      <!-- Giao diện Game Arcade Nổi trên bàn bida -->
+      <!-- 1. Thanh Kéo Cơ Bida Lấy Lực (Arcade Cue Puller - Chuẩn 8 Ball Pool) -->
+      <div class="cue-puller-wrap" id="cuePullerWrap" aria-label="Thanh kéo cơ bida lấy lực">
+        <div class="cue-puller-head">
+          <span class="cue-puller-badge" id="cuePullerPct">0%</span>
+        </div>
+        <div class="cue-puller-track" id="cuePullerTrack" title="Kéo xuống để lấy lực, thả tay để bắn">
+          <div class="cue-puller-meter" id="cuePullerMeter">
+            <div class="cue-puller-fill" id="cuePullerFill"></div>
+          </div>
+          <div class="cue-puller-stick" id="cuePullerStick">
+            <div class="cue-tip-cap"></div>
+            <div class="cue-shaft"></div>
+            <div class="cue-joint"></div>
+            <div class="cue-butt"></div>
+          </div>
+        </div>
+        <div class="cue-puller-hint">KÉO &amp; THẢ</div>
+      </div>
+
+      <!-- 2. Cụm Điều Khiển Nổi Dưới Đáy Màn Hình (HUD Bottom Bar) -->
+      <div class="stage-hud-bottom">
+        <!-- Nút Bi Áp-phê Nổi -->
+        <button type="button" class="floating-spin-btn" id="floatingSpinBtn" title="Chỉnh điểm chạm cơ (Áp-phê, Trô, Cule)" aria-label="Chỉnh áp-phê">
+          <canvas id="floatingSpinCanvas" width="46" height="46"></canvas>
+          <span class="floating-spin-label" id="floatingSpinLabel">Tâm bi</span>
+        </button>
+
+        <!-- Nút Hành Động Trung Tâm -->
+        <div class="stage-center-actions">
+          <button type="button" id="btnQuickShoot" class="btn-quick-shoot" title="Bắn (hoặc phím Cách)">BẮN</button>
+          <button type="button" id="btnOpenLab" class="btn-open-lab" title="Mở bảng phân tích kỹ thuật & thông số">🧪 Thông số &amp; Lab</button>
+        </div>
+
+        <!-- Bánh Xe Vi Chỉnh Góc Ngắm -->
+        <div class="aim-wheel-wrap" id="aimWheelWrap" aria-label="Bánh xe vi chỉnh góc ngắm">
+          <button type="button" class="aim-step-btn" id="btnAimStepLeft" title="Nhích ngắm trái 0.1° (phím A hoặc Mũi tên trái)">‹</button>
+          <div class="aim-wheel-dial" id="aimWheelDial" title="Xoay hoặc vuốt để chỉnh góc ngắm">
+            <div class="aim-wheel-dial-inner">
+              <span class="aim-wheel-tick"></span>
+              <span class="aim-wheel-tick major"></span>
+              <span class="aim-wheel-tick"></span>
+              <span class="aim-wheel-tick major"></span>
+              <span class="aim-wheel-tick"></span>
+              <span class="aim-wheel-center">🎯</span>
+            </div>
+          </div>
+          <button type="button" class="aim-step-btn" id="btnAimStepRight" title="Nhích ngắm phải 0.1° (phím D hoặc Mũi tên phải)">›</button>
+        </div>
+      </div>
+
+      <!-- 3. Popover Chỉnh Áp-phê Khi Bấm Vào Bi Nổi -->
+      <div class="spin-popover" id="spinPopover" hidden>
+        <div class="spin-popover-head">
+          <span class="spin-popover-title">Chỉnh Điểm Chạm (Áp-phê)</span>
+          <button type="button" class="spin-popover-close" id="btnCloseSpin">✕</button>
+        </div>
+        <div class="spin-popover-body">
+          <canvas id="popoverSpinCanvas" class="popover-spin-canvas" width="160" height="160"></canvas>
+          <div class="spin-popover-label" id="popoverSpinLabel">Tâm bi (Bi dừng)</div>
+          <div class="spin-popover-hint">Chạm đúp để về tâm bi</div>
+        </div>
+        <div class="spin-popover-foot">
+          <button type="button" class="btn small" id="btnResetSpin">Về tâm bi</button>
+          <button type="button" class="btn primary small" id="btnDoneSpin">Xong</button>
+        </div>
+      </div>
     </section>
 
+    <div class="side-drawer-backdrop" id="sideDrawerBackdrop"></div>
     <section class="side">
+      <div class="side-drawer-head">
+        <span class="side-drawer-title">Bảng Kỹ Thuật &amp; Lab</span>
+        <button type="button" class="side-drawer-close" id="btnCloseSideDrawer" aria-label="Đóng bảng công cụ">✕ Đóng</button>
+      </div>
       <!-- Chế độ Bắn với Bot / Đấu 2 Bot -->
       <div class="drill only-bot" id="botHud">
         <div class="bot-head">

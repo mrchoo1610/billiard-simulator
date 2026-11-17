@@ -7,6 +7,7 @@ import { solveAim } from './core/aim-solver.js';
 import { createRenderer, BALL_COLORS } from './ui/render.js';
 import { createInput, placeBall } from './ui/input.js';
 import { createPanel, tipText, fmtDeg } from './ui/panel.js';
+import { createArcadeControls } from './ui/arcade-controls.js';
 import { createSettings } from './ui/settings.js';
 import { createKeyboard, cycleTarget, nextPocket, isTypingTarget } from './ui/keyboard.js';
 import * as drills from './features/drills.js';
@@ -2940,7 +2941,13 @@ function newSquirtRound() {
 
 /* ------------------------------------------------------------------ UI wiring */
 
+let arcadeControls = null;
+
 function syncControls() {
+  if (arcadeControls) {
+    arcadeControls.setPower(state.power);
+    arcadeControls.setTip(state.tip);
+  }
   panel.syncControls({
     power: state.power,
     aimOffset: state.aimOffset,
@@ -3026,6 +3033,7 @@ let keys = null; // keyboard controller (created below, after the panel exists)
 const panel = createPanel({
   onPower: (p) => {
     state.power = p;
+    arcadeControls?.setPower(p);
     syncTvShotSpecs();
     invalidate();
   },
@@ -3057,6 +3065,7 @@ const panel = createPanel({
   onTip: (tip) => {
     if (!isPlayerReady() || state.mode === 'squirt' || state.mode === 'thickness') return;
     state.tip = tip;
+    arcadeControls?.setTip(tip);
     syncTvShotSpecs();
     invalidate();
   },
@@ -3270,10 +3279,41 @@ const panel = createPanel({
     requestAnimationFrame(() => {
       resizeViews();
       panel.resize();
+      arcadeControls?.resize();
       invalidate({ pred: false });
     });
   },
 });
+
+arcadeControls = createArcadeControls({
+  onPower: (p) => {
+    state.power = p;
+    panel.syncControls({ power: p });
+    syncTvShotSpecs();
+    invalidate();
+  },
+  onShoot: () => startShot(false),
+  onNudge: nudgeAim,
+  onTip: (tip) => {
+    if (!isPlayerReady() || state.mode === 'squirt' || state.mode === 'thickness') return;
+    state.tip = tip;
+    panel.spinPad?.set(tip, true);
+    syncTvShotSpecs();
+    invalidate();
+  },
+});
+
+const origSetTurnLocked = panel.setTurnLocked;
+panel.setTurnLocked = (locked) => {
+  origSetTurnLocked(locked);
+  arcadeControls?.setLocked(locked);
+};
+
+const origSetAppMode = panel.setAppMode;
+panel.setAppMode = (appMode) => {
+  origSetAppMode(appMode);
+  arcadeControls?.setAppMode(appMode);
+};
 
 const settings = createSettings({
   canChange: () => isPlayerReady() && !isPvpMode(),
@@ -3485,11 +3525,13 @@ if (typeof ResizeObserver !== 'undefined') {
   new ResizeObserver(() => {
     resizeViews();
     panel.resize();
+    arcadeControls?.resize();
     invalidate({ pred: false });
   }).observe(document.getElementById('stage'));
 }
 window.addEventListener('resize', () => {
   resizeViews();
+  arcadeControls?.resize();
   invalidate({ pred: false });
 });
 
@@ -3643,21 +3685,25 @@ function toggleAimAid() {
 }
 
 function toggleSidePanel() {
-  document.body.classList.toggle('side-collapsed');
-  const collapsed = document.body.classList.contains('side-collapsed');
+  const sideEl = document.querySelector('.side');
+  const backdrop = document.getElementById('sideDrawerBackdrop');
+  const isOpen = !sideEl?.classList.contains('is-open');
+  sideEl?.classList.toggle('is-open', isOpen);
+  backdrop?.classList.toggle('is-open', isOpen);
   const btn = document.getElementById('btnToggleSide');
   if (btn) {
-    btn.textContent = collapsed ? '⚙️ Hiện bảng' : '📺 Bàn xem';
-    btn.setAttribute('aria-pressed', String(collapsed));
-    btn.title = collapsed
-      ? 'Đang ẩn thanh bên (toàn màn hình bàn bida). Bấm hoặc nhấn phím B để hiện lại'
-      : 'Bấm hoặc nhấn phím B để ẩn thanh bên và mở rộng bàn bida xem như TV';
+    btn.textContent = isOpen ? '✕ Đóng bảng' : '🧪 Thông số & Lab';
+    btn.setAttribute('aria-pressed', String(isOpen));
+    btn.title = isOpen
+      ? 'Đóng bảng điều khiển và lab bên phải (phím B)'
+      : 'Mở bảng điều khiển và thông số bên phải (phím B)';
   }
   resizeViews();
   panel.resize();
+  arcadeControls?.resize();
   invalidate({ pred: false });
-  panel.toast(collapsed ? '📺 Chế độ toàn màn hình (Đã ẩn bảng điều khiển - Phím B để mở lại)' : '📊 Đã hiện lại bảng điều khiển', 'ok');
-  return collapsed;
+  panel.toast(isOpen ? '📊 Đã mở bảng điều khiển & thông số' : '📺 Đã đóng bảng điều khiển (Toàn màn hình)', 'ok');
+  return isOpen;
 }
 
 function syncViewUi() {
@@ -3673,9 +3719,10 @@ function syncViewUi() {
   }
   const btnToggleSide = document.getElementById('btnToggleSide');
   if (btnToggleSide) {
-    const collapsed = document.body.classList.contains('side-collapsed');
-    btnToggleSide.textContent = collapsed ? '⚙️ Hiện bảng' : '📺 Bàn xem';
-    btnToggleSide.setAttribute('aria-pressed', String(collapsed));
+    const sideEl = document.querySelector('.side');
+    const isOpen = sideEl?.classList.contains('is-open');
+    btnToggleSide.textContent = isOpen ? '✕ Đóng bảng' : '🧪 Thông số & Lab';
+    btnToggleSide.setAttribute('aria-pressed', String(isOpen));
   }
   syncAimAidUi();
 }
