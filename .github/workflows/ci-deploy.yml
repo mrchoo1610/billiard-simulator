@@ -2,7 +2,7 @@ name: CI and deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, chore/deploy-self-hosted]
   pull_request:
   workflow_dispatch:
 
@@ -59,7 +59,7 @@ jobs:
           exit 1
 
       - name: Push to GHCR
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        if: github.event_name != 'pull_request'
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -68,11 +68,11 @@ jobs:
           docker push "${{ steps.meta.outputs.repo }}:latest"
 
   deploy:
-    # Runs only on main, and only once the repository variable DEPLOY_ENABLED is set to "true"
-    # (Settings -> Secrets and variables -> Actions -> Variables). See docs/deploy-vps.md.
+    # Runs on the self-hosted Linux runner (server).
+    # Builds and pushes image first, then this job pulls the image directly on the host and restarts.
     needs: image
-    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request' && vars.DEPLOY_ENABLED == 'true'
-    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' && vars.DEPLOY_ENABLED != 'false'
+    runs-on: [self-hosted, Linux]
     environment: production
     permissions:
       contents: read
@@ -82,61 +82,51 @@ jobs:
       cancel-in-progress: false
     env:
       IMAGE: ${{ needs.image.outputs.image }}
-      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-      DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-      DEPLOY_PORT: ${{ secrets.DEPLOY_PORT }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
       DEPLOY_URL: ${{ vars.DEPLOY_URL }}
     steps:
       - uses: actions/checkout@v5
 
-      - name: Configure SSH
-        env:
-          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_KEY" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-
-      - name: Upload compose file
-        run: |
-          scp -i ~/.ssh/deploy_key -P "${DEPLOY_PORT:-22}" -o StrictHostKeyChecking=yes \
-            docker-compose.yml "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_PATH}/docker-compose.yml"
-
-      - name: Pull image and restart
+      - name: Deploy container with Docker Compose
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # The job token is piped over SSH for this one pull and the server is logged out again afterwards.
-        # The server's own .env keeps PORT / ALLOWED_ORIGINS / TUNNEL_TOKEN; IMAGE is set per deploy here.
         run: |
-          printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/deploy_key -p "${DEPLOY_PORT:-22}" -o StrictHostKeyChecking=yes \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" "
-              set -e
-              cd '${DEPLOY_PATH}'
-              docker login ghcr.io -u '${GITHUB_ACTOR}' --password-stdin
-              export IMAGE='${IMAGE}'
-              docker compose pull app
-              docker compose up -d --no-build app
-              docker logout ghcr.io
-              printf '%s\n' '${IMAGE}' > current-image.txt
-              docker image prune -f
-            "
+          set -euo pipefail
+          DEPLOY_DIR="${DEPLOY_PATH:-/srv/bida}"
+
+          if [ -d "$DEPLOY_DIR" ] && [ -w "$DEPLOY_DIR" ]; then
+            echo "Deploying to $DEPLOY_DIR"
+            cp docker-compose.yml "$DEPLOY_DIR/docker-compose.yml"
+            cd "$DEPLOY_DIR"
+          else
+            echo "Using workspace directory $(pwd) for deploy"
+            if [ ! -f .env ]; then
+              cp .env.example .env
+            fi
+          fi
+
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          export IMAGE="${IMAGE}"
+          docker compose pull app
+          docker compose up -d --no-build app
+          docker logout ghcr.io
+          printf '%s\n' "${IMAGE}" > current-image.txt
+          docker image prune -f
 
       - name: Health check
         run: |
+          PORT_VAL="${PORT:-28787}"
+          CHECK_URL="${DEPLOY_URL%/}/healthz"
+          if [ -z "$DEPLOY_URL" ]; then
+            CHECK_URL="http://127.0.0.1:${PORT_VAL}/healthz"
+          fi
+          echo "Checking container health at $CHECK_URL..."
           for i in 1 2 3 4 5 6; do
-            if [ "$(curl -fsS --max-time 10 "${DEPLOY_URL%/}/healthz" || true)" = "ok" ]; then
-              echo "healthy"
+            if [ "$(curl -fsS --max-time 10 "$CHECK_URL" || true)" = "ok" ]; then
+              echo "Container is healthy!"
               exit 0
             fi
             sleep 5
           done
-          echo "health check failed: ${DEPLOY_URL%/}/healthz" >&2
+          echo "Health check failed: $CHECK_URL" >&2
           exit 1
-
-      - name: Remove SSH key
-        if: always()
-        run: rm -f ~/.ssh/deploy_key
