@@ -84,6 +84,8 @@ jobs:
       IMAGE: ${{ needs.image.outputs.image }}
       DEPLOY_PATH: ${{ vars.DEPLOY_PATH }}
       DEPLOY_URL: ${{ vars.DEPLOY_URL }}
+      GA_MEASUREMENT_ID: ${{ vars.GA_MEASUREMENT_ID }}
+      ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
     steps:
       - uses: actions/checkout@v5
 
@@ -107,6 +109,8 @@ jobs:
 
           echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
           export IMAGE="${IMAGE}"
+          [ -n "${GA_MEASUREMENT_ID:-}" ] && export GA_MEASUREMENT_ID="${GA_MEASUREMENT_ID}"
+          [ -n "${ALLOWED_ORIGINS:-}" ] && export ALLOWED_ORIGINS="${ALLOWED_ORIGINS}"
           docker compose pull app
           docker compose up -d --no-build app
           docker logout ghcr.io
