@@ -983,7 +983,7 @@ select option {
 }
 
 /* -------------------------------------------------------------
-   TV Live Broadcast Scoreboard Overlay (Matchroom / ESPN style)
+   TV Live Broadcast Scoreboard Overlay (Streamlined Esports Capsule)
    ------------------------------------------------------------- */
 .tv-scoreboard[hidden] { display: none !important; }
 .tv-scoreboard {
@@ -997,15 +997,15 @@ select option {
   z-index: 15;
   display: flex;
   flex-direction: column;
-  background: rgba(8, 20, 16, 0.86);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background: rgba(8, 20, 16, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border: 1px solid rgba(255, 215, 0, 0.35);
-  border-radius: 12px;
+  border-radius: 24px;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), var(--gloss);
   overflow: hidden;
   max-width: calc(100% - 20px);
-  min-width: 310px;
+  min-width: 320px;
   transition: all 0.2s ease;
   user-select: none;
   -webkit-user-select: none;
@@ -1014,11 +1014,12 @@ select option {
 
 .tv-compact-btn {
   position: absolute;
-  right: 5px;
-  top: 4px;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
   z-index: 6;
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1026,102 +1027,75 @@ select option {
   border: 1px solid rgba(255, 255, 255, 0.16);
   border-radius: 50%;
   color: #ffd700;
-  font-size: 8px;
+  font-size: 7.5px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
 .tv-compact-btn:hover {
   background: rgba(255, 215, 0, 0.25);
   border-color: #ffd700;
-  transform: scale(1.1);
+  transform: translateY(-50%) scale(1.15);
+}
+
+/* Ẩn các thông tin thừa không cần thiết */
+.tv-head-bar,
+.tv-balls-bar,
+.tv-pdiff,
+.tv-cue-indicator,
+.tv-live-badge {
+  display: none !important;
 }
 
 /* Compact mode: single-line mini pill */
 .tv-scoreboard.is-compact {
   border-radius: 20px;
-  min-width: 270px;
+  min-width: 250px;
 }
-.tv-scoreboard.is-compact .tv-head-bar,
-.tv-scoreboard.is-compact .tv-balls-bar,
-.tv-scoreboard.is-compact .tv-pdiff {
+.tv-scoreboard.is-compact .tv-meta-row {
   display: none !important;
 }
 .tv-scoreboard.is-compact .tv-main-bar {
-  padding: 3px 10px;
-}
-
-.tv-head-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 2px 10px;
-  padding-right: 28px;
-  background: rgba(0, 0, 0, 0.45);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.tv-live-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: #ff5252;
-  font-weight: 900;
-}
-.tv-red-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background-color: #ff3b30;
-  box-shadow: 0 0 8px #ff3b30;
-  animation: tvPulse 1.4s infinite ease-in-out;
-}
-@keyframes tvPulse {
-  0%, 100% { opacity: 1; transform: scale(1); }
-  50% { opacity: 0.35; transform: scale(0.85); }
-}
-
-.tv-game-badge {
-  color: var(--accent);
-  font-weight: 800;
-}
-.tv-rack-badge {
-  color: #a7f3d0;
-  background: rgba(16, 185, 129, 0.22);
-  padding: 1px 6px;
-  border-radius: 4px;
+  padding: 2px 8px;
+  padding-right: 26px;
 }
 
 .tv-main-bar {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   background: rgba(8, 22, 17, 0.75);
+  padding: 3px 8px;
+  padding-right: 28px;
 }
 
 .tv-player {
   flex: 1;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 5px 10px;
+  gap: 8px;
+  padding: 3px 8px;
   position: relative;
   transition: all 0.25s ease;
-  opacity: 0.7;
+  opacity: 0.75;
 }
 
 .tv-player.active-shooter {
   opacity: 1;
-  background: linear-gradient(180deg, rgba(255, 215, 0, 0.24), rgba(255, 180, 0, 0.08));
-  box-shadow: inset 0 0 16px rgba(255, 215, 0, 0.28);
+  background: linear-gradient(180deg, rgba(255, 215, 0, 0.22), rgba(255, 180, 0, 0.06));
+  box-shadow: inset 0 0 14px rgba(255, 215, 0, 0.25);
+  border-radius: 18px;
 }
 .tv-player-1.active-shooter {
-  border-bottom: 2.5px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
 }
 .tv-player-2.active-shooter {
-  border-bottom: 2.5px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+}
+
+.tv-player-1 {
+  justify-content: flex-start;
+}
+.tv-player-2 {
+  justify-content: flex-end;
 }
 
 .tv-pname {
@@ -1130,7 +1104,7 @@ select option {
   color: #ffffff;
   letter-spacing: 0.02em;
   white-space: nowrap;
-  max-width: 95px;
+  max-width: 85px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
@@ -1139,32 +1113,17 @@ select option {
   text-shadow: 0 0 8px rgba(255, 215, 0, 0.6);
 }
 
-.tv-pdiff {
-  font-size: 9.5px;
-  font-weight: 700;
-  color: var(--muted);
-  text-transform: uppercase;
-  background: rgba(255, 255, 255, 0.08);
-  padding: 1px 4px;
-  border-radius: 4px;
-}
-
 .tv-pscore {
-  font-size: 19px;
+  font-size: 17px;
   font-weight: 900;
   color: #ffffff;
-  min-width: 22px;
+  min-width: 20px;
   text-align: center;
   font-variant-numeric: tabular-nums;
   background: rgba(0, 0, 0, 0.45);
   padding: 1px 6px;
   border-radius: 5px;
   border: 1px solid rgba(255, 255, 255, 0.12);
-  margin-left: auto;
-}
-.tv-player-2 .tv-pscore {
-  margin-left: 0;
-  margin-right: auto;
 }
 .active-shooter .tv-pscore {
   color: var(--accent);
@@ -1172,43 +1131,63 @@ select option {
   background: rgba(45, 36, 12, 0.7);
 }
 
-.tv-cue-indicator {
-  font-size: 11px;
-  display: inline-block;
-  opacity: 0;
-  transition: opacity 0.2s;
-  color: #ffd700;
-  filter: drop-shadow(0 0 4px #ffd700);
-}
-.active-shooter .tv-cue-indicator {
-  opacity: 1;
-  animation: tvCueGlow 1.2s infinite alternate ease-in-out;
-}
-@keyframes tvCueGlow {
-  from { transform: scale(0.9); opacity: 0.75; }
-  to { transform: scale(1.2); opacity: 1; }
-}
-
 .tv-divider {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 2px;
   align-items: center;
   justify-content: center;
-  padding: 2px 8px;
+  padding: 2px 10px;
+  margin: 0 4px;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.35);
+  border-radius: 8px;
+  min-width: 100px;
 }
 
+.tv-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 8.5px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tv-game-badge {
+  color: var(--accent);
+  font-weight: 800;
+}
+.tv-rack-badge {
+  color: #a7f3d0;
+  background: rgba(16, 185, 129, 0.22);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.tv-status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
 .tv-target-badge {
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 800;
   color: #ffd54a;
   background: rgba(255, 213, 74, 0.18);
-  padding: 2px 6px;
-  border-radius: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 213, 74, 0.3);
   white-space: nowrap;
+}
+.tv-scratch-badge {
+  font-size: 9px;
+  font-weight: 900;
+  color: #fff;
+  background: #ef4444;
+  padding: 1px 4px;
+  border-radius: 3px;
 }
 
 /* -------------------------------------------------------------

@@ -11,7 +11,7 @@
   <title>MimePool – Bida 9 bi &amp; 8 bi online</title>
   <link rel="manifest" href="assets/manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/style.css?v=45">
+  <link rel="stylesheet" href="assets/style.css?v=46">
 </head>
 <body data-app="practice" data-mode="free">
   <header class="top">
@@ -49,14 +49,9 @@
       <div class="v3-load" id="v3load" role="status" hidden>Đang tải 3D…</div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-      <!-- Bảng điểm Trực tiếp kiểu TV (Live Broadcast Scoreboard) -->
+      <!-- Bảng điểm Trận đấu Tinh gọn (Streamlined Esports Match Scoreboard) -->
       <div class="tv-scoreboard" id="tvScoreboard" hidden>
         <button type="button" class="tv-compact-btn" id="btnToggleTvCompact" title="Thu gọn / Mở rộng bảng điểm (phím T)">▼</button>
-        <div class="tv-head-bar">
-          <div class="tv-live-badge"><span class="tv-red-dot"></span> LIVE</div>
-          <div class="tv-game-badge" id="tvGameBadge">9 BI · CHẠM 5</div>
-          <div class="tv-rack-badge" id="tvRackBadge">VÁN 1</div>
-        </div>
         <div class="tv-main-bar">
           <div class="tv-player tv-player-1" id="tvPlayer1">
             <div class="tv-clock-wrap" id="tvClockWrap1" title="Thời gian lượt bắn">
@@ -66,28 +61,23 @@
               </svg>
               <span class="tv-avatar-icon" id="tvAvatar1">👤</span>
             </div>
-            <div class="tv-pinfo">
-              <div class="tv-pname-row">
-                <span class="tv-cue-indicator" id="tvCue1" title="Lượt bắn">⚪</span>
-                <span class="tv-pname" id="tvName1">BẠN</span>
-              </div>
-              <span class="tv-pdiff" id="tvDiff1">CƠ THỦ</span>
-            </div>
+            <span class="tv-pname" id="tvName1">BẠN</span>
             <span class="tv-pscore" id="tvScore1">0</span>
           </div>
           <div class="tv-divider">
-            <span class="tv-target-badge" id="tvTargetBadge">Bi #1</span>
-            <span class="tv-shot-clock-sec" id="tvShotClockSec" title="Đồng hồ lượt bắn">30s</span>
+            <div class="tv-meta-row">
+              <span class="tv-game-badge" id="tvGameBadge">9 BI · CHẠM 5</span>
+              <span class="tv-rack-badge" id="tvRackBadge">VÁN 1</span>
+            </div>
+            <div class="tv-status-row">
+              <span class="tv-target-badge" id="tvTargetBadge">Bi #1</span>
+              <span class="tv-shot-clock-sec" id="tvShotClockSec" title="Đồng hồ lượt bắn">30s</span>
+              <span class="tv-scratch-badge" id="tvScratchBadge" hidden>FOUL</span>
+            </div>
           </div>
           <div class="tv-player tv-player-2" id="tvPlayer2">
             <span class="tv-pscore" id="tvScore2">0</span>
-            <div class="tv-pinfo tv-pinfo-right">
-              <div class="tv-pname-row">
-                <span class="tv-pname" id="tvName2">BOT</span>
-                <span class="tv-cue-indicator" id="tvCue2" title="Lượt bắn">⚪</span>
-              </div>
-              <span class="tv-pdiff" id="tvDiff2">TB</span>
-            </div>
+            <span class="tv-pname" id="tvName2">BOT</span>
             <div class="tv-clock-wrap" id="tvClockWrap2" title="Thời gian lượt bắn">
               <svg class="shot-clock-svg" width="28" height="28" viewBox="0 0 28 28">
                 <circle class="shot-clock-bg" fill="none" cx="14" cy="14" r="11" />
@@ -97,12 +87,10 @@
             </div>
           </div>
         </div>
-        <div class="tv-balls-bar" id="tvBallsBar" aria-label="Các bi còn lại trên bàn">
-          <div class="tv-balls-meta">
-            <span class="tv-balls-count" id="tvBallsCount">9/9</span>
-          </div>
+        <!-- Vùng ẩn giữ dữ liệu bi cho các hàm tính toán mà không gây rối mắt -->
+        <div class="tv-balls-bar" id="tvBallsBar" hidden style="display: none !important;">
+          <span class="tv-balls-count" id="tvBallsCount"></span>
           <div class="tv-balls-list" id="tvBallsList"></div>
-          <span class="tv-scratch-badge" id="tvScratchBadge" hidden>FOUL</span>
         </div>
       </div>
 
@@ -151,7 +139,6 @@
         <!-- Nút Hành Động Trung Tâm -->
         <div class="stage-center-actions">
           <button type="button" id="btnQuickShoot" class="btn-quick-shoot" title="Bắn (hoặc phím Cách)">BẮN</button>
-          <button type="button" id="btnBottomSettings" class="btn-open-settings" title="Cài đặt game (Góc nhìn, Thiết bị, Âm thanh, Camera...)">⚙️ Cài đặt</button>
         </div>
 
         <!-- Bánh Xe Vi Chỉnh Góc Ngắm -->
