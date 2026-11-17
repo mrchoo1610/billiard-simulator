@@ -147,6 +147,42 @@ export function createSoundEngine({ initialEnabled = true, onChange = null } = {
     });
   }
 
+  /** Shot Clock tick sound */
+  function timerTick(urgent = false) {
+    if (!enabled) return;
+    if (urgent) {
+      tone({ f0: 920, f1: 880, dur: 0.03, gain: 0.15, type: 'sine' });
+    } else {
+      tone({ f0: 480, f1: 440, dur: 0.02, gain: 0.06, type: 'sine' });
+    }
+  }
+
+  /** Chime on potting a ball */
+  function potTone(isSpecial = false) {
+    if (!enabled) return;
+    if (isSpecial) {
+      tone({ f0: 587.33, dur: 0.12, gain: 0.2, type: 'triangle' });
+      tone({ f0: 880, dur: 0.16, gain: 0.22, type: 'triangle', delay: 0.06 });
+      tone({ f0: 1174.66, dur: 0.25, gain: 0.26, type: 'triangle', delay: 0.12 });
+    } else {
+      tone({ f0: 659.25, f1: 987.77, dur: 0.14, gain: 0.18, type: 'triangle' });
+    }
+  }
+
+  /** Buzzer tone on foul / scratch */
+  function foulTone() {
+    if (!enabled) return;
+    tone({ f0: 190, f1: 120, dur: 0.22, gain: 0.24, type: 'sawtooth' });
+    burst({ filter: 'bandpass', freq: 480, q: 1.6, dur: 0.14, gain: 0.18 });
+  }
+
+  /** Subtle haptic sound when pulling cue stick */
+  function cueDragTone(power) {
+    if (!enabled) return;
+    const freq = 180 + power * 220;
+    tone({ f0: freq, dur: 0.015, gain: 0.03, type: 'sine' });
+  }
+
   return {
     isEnabled: () => enabled,
     setEnabled,
@@ -160,5 +196,9 @@ export function createSoundEngine({ initialEnabled = true, onChange = null } = {
     cushionHit,
     pocketDrop,
     cheer,
+    timerTick,
+    potTone,
+    foulTone,
+    cueDragTone,
   };
 }

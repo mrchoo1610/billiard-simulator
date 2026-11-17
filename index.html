@@ -76,19 +76,42 @@
         </div>
         <div class="tv-main-bar">
           <div class="tv-player tv-player-1" id="tvPlayer1">
-            <span class="tv-cue-indicator" id="tvCue1" title="Lượt bắn">⚪</span>
-            <span class="tv-pname" id="tvName1">BẠN</span>
-            <span class="tv-pdiff" id="tvDiff1">CƠ THỦ</span>
+            <div class="tv-clock-wrap" id="tvClockWrap1" title="Thời gian lượt bắn">
+              <svg class="shot-clock-svg" width="28" height="28" viewBox="0 0 28 28">
+                <circle class="shot-clock-bg" cx="14" cy="14" r="11" />
+                <circle class="shot-clock-bar" id="shotClockBar1" cx="14" cy="14" r="11" />
+              </svg>
+              <span class="tv-avatar-icon" id="tvAvatar1">👤</span>
+            </div>
+            <div class="tv-pinfo">
+              <div class="tv-pname-row">
+                <span class="tv-cue-indicator" id="tvCue1" title="Lượt bắn">⚪</span>
+                <span class="tv-pname" id="tvName1">BẠN</span>
+              </div>
+              <span class="tv-pdiff" id="tvDiff1">CƠ THỦ</span>
+            </div>
             <span class="tv-pscore" id="tvScore1">0</span>
           </div>
           <div class="tv-divider">
             <span class="tv-target-badge" id="tvTargetBadge">Bi #1</span>
+            <span class="tv-shot-clock-sec" id="tvShotClockSec" title="Đồng hồ lượt bắn">30s</span>
           </div>
           <div class="tv-player tv-player-2" id="tvPlayer2">
             <span class="tv-pscore" id="tvScore2">0</span>
-            <span class="tv-pdiff" id="tvDiff2">TB</span>
-            <span class="tv-pname" id="tvName2">BOT</span>
-            <span class="tv-cue-indicator" id="tvCue2" title="Lượt bắn">⚪</span>
+            <div class="tv-pinfo tv-pinfo-right">
+              <div class="tv-pname-row">
+                <span class="tv-pname" id="tvName2">BOT</span>
+                <span class="tv-cue-indicator" id="tvCue2" title="Lượt bắn">⚪</span>
+              </div>
+              <span class="tv-pdiff" id="tvDiff2">TB</span>
+            </div>
+            <div class="tv-clock-wrap" id="tvClockWrap2" title="Thời gian lượt bắn">
+              <svg class="shot-clock-svg" width="28" height="28" viewBox="0 0 28 28">
+                <circle class="shot-clock-bg" cx="14" cy="14" r="11" />
+                <circle class="shot-clock-bar" id="shotClockBar2" cx="14" cy="14" r="11" />
+              </svg>
+              <span class="tv-avatar-icon" id="tvAvatar2">🤖</span>
+            </div>
           </div>
         </div>
         <div class="tv-balls-bar" id="tvBallsBar" aria-label="Các bi còn lại trên bàn">
@@ -98,6 +121,20 @@
           </div>
           <div class="tv-balls-list" id="tvBallsList"></div>
           <span class="tv-scratch-badge" id="tvScratchBadge" hidden>FOUL</span>
+        </div>
+      </div>
+
+      <!-- Hiệu ứng Đèn Rọi & Vignette Phòng Bida Sang Trọng -->
+      <div class="table-vignette" aria-hidden="true"></div>
+
+      <!-- Banner Sự Kiện Trận Đấu Nổi Bật (Esports Match Callout Banner) -->
+      <div class="game-callout-banner" id="gameCalloutBanner" hidden>
+        <div class="callout-box" id="calloutBox">
+          <span class="callout-icon" id="calloutIcon">🔥</span>
+          <div class="callout-text-wrap">
+            <span class="callout-title" id="calloutTitle">NICE SHOT!</span>
+            <span class="callout-subtitle" id="calloutSubtitle">Ăn bi mục tiêu chính xác</span>
+          </div>
         </div>
       </div>
 

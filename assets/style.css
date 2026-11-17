@@ -1152,9 +1152,11 @@ select option {
 
 .tv-divider {
   display: flex;
+  flex-direction: column;
+  gap: 3px;
   align-items: center;
   justify-content: center;
-  padding: 0 6px;
+  padding: 2px 8px;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
   border-right: 1px solid rgba(255, 255, 255, 0.08);
   background: rgba(0, 0, 0, 0.35);
@@ -2030,4 +2032,191 @@ body[data-app="pvp"] #mainModes button[data-app="pvp"].active { background: line
     height: 30px;
     font-size: 16px;
   }
+}
+
+/* =============================================================
+   Esports Match HUD: Shot Clock, Avatars & Callout Banners
+   ============================================================= */
+.table-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+  background: radial-gradient(ellipse at 50% 50%, rgba(255, 255, 255, 0.035) 0%, rgba(0, 0, 0, 0) 58%, rgba(0, 0, 0, 0.48) 100%);
+  box-shadow: inset 0 0 70px rgba(0, 0, 0, 0.65);
+}
+
+@keyframes stageShake {
+  0% { transform: translate(0, 0); }
+  20% { transform: translate(-3px, 2px); }
+  40% { transform: translate(3px, -2px); }
+  60% { transform: translate(-2px, -1px); }
+  80% { transform: translate(1px, 2px); }
+  100% { transform: translate(0, 0); }
+}
+.stage-shake {
+  animation: stageShake 0.28s cubic-bezier(0.36, 0.07, 0.19, 0.97);
+}
+
+.tv-clock-wrap {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.shot-clock-svg {
+  position: absolute;
+  inset: 0;
+  width: 28px;
+  height: 28px;
+  transform: rotate(-90deg);
+}
+.shot-clock-bg {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.15);
+  stroke-width: 2.2;
+}
+.shot-clock-bar {
+  fill: none;
+  stroke: #10b981;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 69.12;
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 0.25s linear, stroke 0.25s ease;
+}
+.tv-clock-wrap.active .shot-clock-bar {
+  stroke: #ffd700;
+  filter: drop-shadow(0 0 3px rgba(255, 215, 0, 0.8));
+}
+.tv-clock-wrap.urgent .shot-clock-bar {
+  stroke: #ef4444;
+  filter: drop-shadow(0 0 5px #ef4444);
+  animation: clockPulse 0.5s infinite alternate ease-in-out;
+}
+@keyframes clockPulse {
+  from { transform: scale(1); }
+  to { transform: scale(1.08); }
+}
+.tv-avatar-icon {
+  font-size: 14px;
+  z-index: 1;
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.tv-pinfo {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.tv-pinfo-right {
+  align-items: flex-end;
+}
+.tv-pname-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.tv-shot-clock-sec {
+  font-size: 10px;
+  font-weight: 900;
+  color: #ffd700;
+  font-variant-numeric: tabular-nums;
+  background: rgba(0, 0, 0, 0.55);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 215, 0, 0.25);
+}
+.tv-shot-clock-sec.urgent {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.2);
+  animation: clockSecPulse 0.5s infinite alternate ease-in-out;
+}
+@keyframes clockSecPulse {
+  from { opacity: 0.8; }
+  to { opacity: 1; transform: scale(1.08); }
+}
+
+.game-callout-banner[hidden] {
+  display: none !important;
+}
+.game-callout-banner {
+  position: absolute;
+  top: 36%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 50;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+.game-callout-banner.is-active {
+  opacity: 1;
+  animation: calloutPop 0.35s cubic-bezier(0.18, 0.89, 0.32, 1.28) forwards;
+}
+@keyframes calloutPop {
+  0% { transform: translate(-50%, -50%) scale(0.6); opacity: 0; }
+  60% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+  100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
+}
+.callout-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 22px;
+  border-radius: 36px;
+  background: rgba(6, 17, 13, 0.94);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 2px solid #ffd700;
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.75), 0 0 25px rgba(255, 215, 0, 0.35);
+}
+.callout-box.kind-good {
+  border-color: #10b981;
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.75), 0 0 25px rgba(16, 185, 129, 0.45);
+}
+.callout-box.kind-bad {
+  border-color: #ef4444;
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.75), 0 0 25px rgba(239, 68, 68, 0.45);
+}
+.callout-box.kind-warn {
+  border-color: #f59e0b;
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.75), 0 0 25px rgba(245, 158, 11, 0.45);
+}
+.callout-box.kind-gold {
+  border-color: #ffd700;
+  box-shadow: 0 16px 45px rgba(0, 0, 0, 0.75), 0 0 35px rgba(255, 215, 0, 0.6);
+}
+.callout-icon {
+  font-size: 28px;
+  line-height: 1;
+}
+.callout-text-wrap {
+  display: flex;
+  flex-direction: column;
+}
+.callout-title {
+  font-size: 18px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  color: #fff;
+  text-transform: uppercase;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+}
+.kind-good .callout-title { color: #a7f3d0; text-shadow: 0 0 10px rgba(16, 185, 129, 0.6); }
+.kind-bad .callout-title { color: #fecaca; text-shadow: 0 0 10px rgba(239, 68, 68, 0.6); }
+.kind-warn .callout-title { color: #fef3c7; text-shadow: 0 0 10px rgba(245, 158, 11, 0.6); }
+.kind-gold .callout-title { color: #fef08a; text-shadow: 0 0 14px rgba(255, 215, 0, 0.8); }
+.callout-subtitle {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
 }

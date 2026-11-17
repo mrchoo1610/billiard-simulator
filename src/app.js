@@ -8,6 +8,7 @@ import { createRenderer, BALL_COLORS } from './ui/render.js';
 import { createInput, placeBall } from './ui/input.js';
 import { createPanel, tipText, fmtDeg } from './ui/panel.js';
 import { createArcadeControls } from './ui/arcade-controls.js';
+import { createMatchFx } from './ui/match-fx.js';
 import { createSettings } from './ui/settings.js';
 import { createKeyboard, cycleTarget, nextPocket, isTypingTarget } from './ui/keyboard.js';
 import * as drills from './features/drills.js';
@@ -212,6 +213,8 @@ function isHeroWho(who) {
   const name = (botNameOf(who) || '').toLowerCase();
   return name.includes('hero');
 }
+
+let matchFx = null;
 
 function clearBotTimers() {
   for (const id of state.bot.timers) clearTimeout(id);
@@ -831,6 +834,7 @@ function startShot(allowBot = false) {
 function doShot(remote = null) {
   if (remote ? state.phase !== 'aim' : !info || state.phase !== 'aim') return;
   if (state.mode === 'thickness' && !state.answered) return;
+  matchFx?.stopShotClock();
   lastScratch = false;
   if (!remote) info = computeInfo(true); // fresh aim-solver result, never a throttled stale one
   state.preShot = snapshot();
@@ -846,6 +850,19 @@ function doShot(remote = null) {
   state.sim = createSim(state.balls, { recordPaths: true, table: eq.table, cue: eq.cue, rng: simRng });
   const launch = state.sim.strike(strikeParams);
   sound.cueHit(state.power, !!(launch && launch.miscue));
+  if (state.power >= 0.45 && !launch?.miscue) {
+    const stageEl = typeof document !== 'undefined' ? document.getElementById('stage') : null;
+    if (stageEl) {
+      stageEl.classList.remove('stage-shake');
+      void stageEl.offsetWidth;
+      stageEl.classList.add('stage-shake');
+    }
+    try {
+      if (typeof navigator !== 'undefined' && navigator.vibrate) {
+        navigator.vibrate(Math.round(25 + 35 * state.power));
+      }
+    } catch (_) {}
+  }
   state.phase = 'shooting';
   lastT = 0;
   timeScale = 1;
@@ -1104,6 +1121,11 @@ function finishShot() {
         if (isPvp) state.pvp.rematch = { me: false, peer: false };
         state.bot.statusText = `🏆 TRẬN ĐẤU KẾT THÚC: ${winnerName} chiến thắng chung cuộc (${p1Score} - ${p2Score}, Chạm ${raceTo})!`;
         toast(state.bot.statusText, 'ok');
+        matchFx?.showCallout({
+          kind: 'victory',
+          title: 'VICTORY!',
+          subtitle: `${winnerName} thắng chung cuộc (${p1Score} - ${p2Score})!`,
+        });
         panel.setMatchWin(true, {
           title: `🏆 ${winnerName} Thắng Chung Cuộc!`,
           desc: `${winnerName} đã xuất sắc chạm mốc ${raceTo} ván thắng trước!`,
@@ -1116,6 +1138,11 @@ function finishShot() {
         syncControls();
         panel.setTurnLocked(true);
       } else {
+        matchFx?.showCallout({
+          kind: 'rack_win',
+          title: 'THẮNG VÁN!',
+          subtitle: `${winnerName} thắng ván ${rackNo}!`,
+        });
         if (neutral) {
           state.bot.statusText = res.loseRack
             ? `🏆 ${winnerName} thắng ván ${rackNo} (${nameWas} phạm lỗi bi 8)! Chuẩn bị ván mới...`
@@ -1140,6 +1167,16 @@ function finishShot() {
         if (!isPvp || state.pvp.seat === 1) addBotTimer(() => startBotRack(rackWinner), Math.round(1500 * delayScale));
       }
     } else if (res.foul) {
+      matchFx?.showCallout({
+        kind: res.cuePotted ? 'scratch' : 'foul',
+        title: res.cuePotted ? 'SCRATCH!' : 'FOUL!',
+        subtitle: res.foulReason || 'Phạm quy',
+      });
+      if (opp === 'player' && !isBvb) {
+        setTimeout(() => {
+          matchFx?.showCallout({ kind: 'ball_in_hand' });
+        }, 1700);
+      }
       const next = opp;
       state.bot.turn = next;
       state.bot.ballInHand = true;
@@ -1165,6 +1202,12 @@ function finishShot() {
       syncControls();
       if (isBvb || next === 'bot') scheduleBotTurn();
     } else if (res.keepTurn) {
+      const isCombo = res.pottedObj && res.pottedObj.length > 1;
+      matchFx?.showCallout({
+        kind: isCombo ? 'combo' : 'pot',
+        title: isCombo ? 'COMBO POT!' : 'NICE SHOT!',
+        subtitle: `${nameWas} đánh bi vào lỗ`,
+      });
       state.bot.ballInHand = false;
       state.bot.isFoul = false;
       state.aimMode = 'manual';
@@ -1206,6 +1249,9 @@ function finishShot() {
       toast(neutral ? `Đến lượt ${nameOpp}...` : next === 'player' ? 'Đến lượt bạn!' : 'Đến lượt Bot...', '');
       syncControls();
       if (isBvb || next === 'bot') scheduleBotTurn();
+    }
+    if (!res.winRack && !res.loseRack && !state.bot.matchOver && state.mode === 'bot') {
+      matchFx?.startShotClock(30, state.bot.turn);
     }
   } else {
     let msg;
@@ -1723,7 +1769,50 @@ function startBotRack(breaker = state.bot.breaker) {
   syncControls();
   invalidate();
   if (isPvpMode() && state.pvp.seat === 1) pvpSendSync('rack'); // only the host racks; the guest receives the layout
+  if (state.mode === 'bot' && !state.bot.matchOver) matchFx?.startShotClock(30, breaker);
   if (breaker === 'bot' || state.bot.matchType === 'bvb') scheduleBotTurn();
+}
+
+function handleShotTimeout(who) {
+  if (state.mode !== 'bot' || state.phase !== 'aim' || state.bot.matchOver) return;
+  const shooter = who || state.bot.turn;
+  const opp = state.bot.matchType === 'bvb'
+    ? (shooter === 'bot1' ? 'bot2' : 'bot1')
+    : (shooter === 'player' ? 'bot' : 'player');
+  const nameWas = botNameOf(shooter);
+  const nameOpp = botNameOf(opp);
+  sound?.foulTone?.();
+  matchFx?.showCallout({
+    kind: 'timeout',
+    title: 'HẾT GIỜ!',
+    subtitle: `${nameWas} quá 30 giây — Quyền đặt bi cho ${nameOpp}!`,
+    duration: 2500,
+  });
+  state.bot.turn = opp;
+  state.bot.ballInHand = true;
+  state.bot.isFoul = true;
+  state.aimMode = 'manual';
+  state.aimOffset = 0;
+  state.tip = { x: 0, y: 0 };
+  panel.spinPad?.set(state.tip, true);
+  if (state.bot.matchType === 'bvb') {
+    state.targetId = firstLegalFor(opp);
+    state.bot.statusText = `⚠️ ${nameWas} hết giờ! Đến lượt ${nameOpp} (đặt bi).`;
+    panel.toast(state.bot.statusText, 'bad');
+  } else if (opp === 'player') {
+    aimAtTargetFor('player');
+    state.bot.statusText = `Bot hết giờ! Bạn được quyền đặt bi tùy ý.`;
+    panel.toast(state.bot.statusText, 'ok');
+  } else {
+    state.targetId = firstLegalFor('bot');
+    state.bot.statusText = `Bạn hết giờ (30s)! Đến lượt Bot (đặt bi).`;
+    panel.toast(state.bot.statusText, 'bad');
+  }
+  syncControls();
+  syncBotUi();
+  invalidate();
+  matchFx?.startShotClock(30, opp);
+  if (state.bot.matchType === 'bvb' || opp === 'bot') scheduleBotTurn();
 }
 
 function scheduleBotTurn() {
@@ -1880,6 +1969,7 @@ function enterBotMode(difficulty, game, raceTo) {
   state.bot.scoreBot = 0;
   state.bot.rack = 1;
   state.bot.breaker = 'player';
+  matchFx?.setAvatars('👤', state.bot.difficulty === 'hero' ? '🦸' : '🤖');
   startBotRack('player');
   trackMatchStart();
 }
@@ -1911,6 +2001,7 @@ function enterBvbMode(opts = {}) {
   state.bot.scoreBot = 0;
   state.bot.rack = 1;
   state.bot.breaker = 'bot1';
+  matchFx?.setAvatars('🤖', '👾');
   startBotRack('bot1');
   trackMatchStart();
 }
@@ -1926,6 +2017,8 @@ function enterPracticeMode(subMode = state.practiceMode, opts = {}) {
   leavePvpIfNeeded();
   if (!isAimReady()) return;
   clearBotTimers();
+  matchFx?.stopShotClock();
+  matchFx?.setAvatars('🎯', '🎱');
   delete document.body.dataset.bvb;
   state.appMode = 'practice';
   state.lobbyOpen = false;
@@ -2375,6 +2468,7 @@ function enterPvpMatch({ seat, code, token, hostName, guestName, game, raceTo, p
   panel.setPvpLobby({ phase: 'idle' });
   panel.setAppMode('pvp');
   panel.setActiveTab('bot');
+  matchFx?.setAvatars('👤', '👥');
   if (!peerOnline) {
     state.pvp.peerOffUntil = Date.now() + 60000;
     pvpStartHudTimer();
@@ -3133,8 +3227,10 @@ const panel = createPanel({
     state.bot.paused = !state.bot.paused;
     if (state.bot.paused) {
       clearBotTimers();
+      matchFx?.pauseShotClock();
       state.bot.statusText = 'Trận đấu đang tạm dừng (⏸). Nhấn Tiếp tục để chạy.';
     } else {
+      matchFx?.resumeShotClock();
       state.bot.statusText = 'Tiếp tục trận đấu (▶)...';
       if (state.bot.pendingRack && !state.bot.matchOver) startBotRack(state.bot.pendingRack);
       else scheduleBotTurn();
@@ -3260,6 +3356,7 @@ const panel = createPanel({
 arcadeControls = createArcadeControls({
   onPower: (p) => {
     state.power = p;
+    sound?.cueDragTone?.(p);
     panel.syncControls({ power: p });
     syncTvShotSpecs();
     invalidate();
@@ -3587,6 +3684,7 @@ const sound = createSoundEngine({
     syncSoundUi();
   },
 });
+matchFx = createMatchFx({ sound, onTimeout: handleShotTimeout });
 
 function syncSoundUi() {
   if (!soundBtn) return;
