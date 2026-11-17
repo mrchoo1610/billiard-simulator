@@ -598,3 +598,17 @@ test('Overlay rules: Practice mode has full aim aids, other modes keep basic aid
     assert.equal(aid.tangent, false, `${diff} must not have tangent angle aid`);
   }
 });
+
+test('Overlay rules: Bot mode has no aim aids (realistic aim only)', () => {
+  function effOverlaysForBot(mode) {
+    if (mode === 'bot') {
+      return { aim: false, actual: false, ghost: false, pocket: false, tangent: false, roll: false, predict: false };
+    }
+    return { aim: true, actual: true, ghost: true, pocket: true, tangent: true, roll: true, predict: true };
+  }
+  const overlays = effOverlaysForBot('bot');
+  assert.equal(overlays.aim, false);
+  assert.equal(overlays.ghost, false);
+  assert.equal(overlays.pocket, false);
+  assert.equal(overlays.predict, false);
+});

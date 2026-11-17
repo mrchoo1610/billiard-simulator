@@ -616,7 +616,6 @@ body[data-mode="thickness"] .panel { display: block; max-height: 22vh; }
   body.kb-hint-on .potted-tray { bottom: 42px; }
   body.kb-hint-on[data-mode="bot"] .potted-tray,
   body.kb-hint-on[data-bvb="true"] .potted-tray { bottom: 126px; }
-  body.kb-hint-on .tv-scoreboard { bottom: 44px; }
 }
 
 @keyframes ballSinkDim {
@@ -990,8 +989,11 @@ select option {
 .tv-scoreboard {
   position: absolute;
   top: 10px;
+  bottom: auto !important;
   left: 50%;
   transform: translateX(-50%);
+  height: auto !important;
+  max-height: none;
   z-index: 15;
   display: flex;
   flex-direction: column;

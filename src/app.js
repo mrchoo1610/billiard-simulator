@@ -405,39 +405,11 @@ function effOverlays() {
     };
   }
 
-  // 2. Các chế độ khác (Đấu Bot, Hero, 1v1 Online PvP, Đấu 2 Bot BvB, Bài tập kỹ năng):
-  // Chỉ có các option cơ bản: đường ngắm (aim), bi ma (ghost), hướng vào lỗ (pocket).
-  // Không có góc bi ra (tangent/roll = false) và dự đoán hướng bi (predict = false), actual = false.
+  // 2. Chế độ Bắn với Bot, Hero, 1v1 Online PvP, BvB:
+  // Theo yêu cầu của người dùng: Bỏ hoàn toàn tia ngắm ở chế độ bắn với Bot!
+  // Chỉ có chế độ Bắn tập (Practice) mới có các tùy chọn tia ngắm hỗ trợ.
   if (state.mode === 'bot') {
-    if (isPvpMode()) {
-      return { aim: true, actual: false, ghost: true, pocket: true, tangent: false, roll: false, predict: false };
-    }
-    if (isBotTurn()) {
-      if (isBvbMode()) {
-        const diff = botDiffOf(state.bot.turn);
-        const aid = botAidFor(diff);
-        return {
-          aim: true,
-          actual: false,
-          ghost: aid.ghost,
-          pocket: aid.pocket,
-          tangent: false,
-          roll: false,
-          predict: false,
-        };
-      }
-      return { aim: false, actual: false, ghost: false, pocket: false, tangent: false, roll: false, predict: false };
-    }
-    const aid = botAidFor(state.bot.difficulty);
-    return {
-      aim: aid.aim,
-      actual: false,
-      ghost: aid.ghost,
-      pocket: aid.pocket,
-      tangent: false,
-      roll: false,
-      predict: false,
-    };
+    return { aim: false, actual: false, ghost: false, pocket: false, tangent: false, roll: false, predict: false };
   }
   if (state.mode === 'thickness') {
     const v = state.revealed;
@@ -3313,6 +3285,7 @@ const origSetAppMode = panel.setAppMode;
 panel.setAppMode = (appMode) => {
   origSetAppMode(appMode);
   arcadeControls?.setAppMode(appMode);
+  syncAimAidUi();
 };
 
 const settings = createSettings({
@@ -3648,9 +3621,11 @@ const opts3d = document.getElementById('v3opts');
 const load3d = document.getElementById('v3load');
 
 function syncAimAidUi() {
-  const on = state.aimAid !== false;
+  const isPractice = state.appMode === 'practice';
+  const on = isPractice && state.aimAid !== false;
   const btnView = document.getElementById('btnViewAimAid');
   if (btnView) {
+    btnView.hidden = !isPractice;
     btnView.setAttribute('aria-pressed', String(on));
     btnView.textContent = on ? '🎯 Tia ngắm' : '👁️ Thực tế';
     btnView.title = on
@@ -3660,20 +3635,22 @@ function syncAimAidUi() {
   }
   const btnBvbAim = document.getElementById('btnBvbAimAid');
   if (btnBvbAim) {
-    btnBvbAim.setAttribute('aria-pressed', String(on));
-    btnBvbAim.textContent = on ? '🎯 Tia ngắm: Bật' : '👁️ Thực tế: Tắt';
-    btnBvbAim.title = on
-      ? 'Đang bật tia ngắm hỗ trợ. Bấm để tắt và xem góc nhìn thực tế'
-      : 'Đang tắt tia ngắm (chế độ thực tế). Bấm để bật lại';
-    btnBvbAim.classList.toggle('realistic-mode', !on);
+    btnBvbAim.hidden = true;
   }
   const lobbyBvbAim = document.getElementById('lobbyBvbAimAid');
-  if (lobbyBvbAim) lobbyBvbAim.checked = on;
+  if (lobbyBvbAim) {
+    const parent = lobbyBvbAim.closest('.lobby-aim-aid-toggle');
+    if (parent) parent.hidden = true;
+  }
   const lobbyBotAim = document.getElementById('lobbyBotAimAid');
-  if (lobbyBotAim) lobbyBotAim.checked = on;
+  if (lobbyBotAim) {
+    const parent = lobbyBotAim.closest('.lobby-aim-aid-toggle');
+    if (parent) parent.hidden = true;
+  }
 }
 
 function toggleAimAid() {
+  if (state.appMode !== 'practice') return false;
   state.aimAid = state.aimAid === false ? true : false;
   lsWrite('bida9-aim-aid', state.aimAid ? '1' : '0');
   predDirty = true;
@@ -3692,11 +3669,12 @@ function toggleSidePanel() {
   backdrop?.classList.toggle('is-open', isOpen);
   const btn = document.getElementById('btnToggleSide');
   if (btn) {
-    btn.textContent = isOpen ? '✕ Đóng bảng' : '🧪 Thông số & Lab';
+    const isPractice = state.appMode === 'practice';
+    btn.textContent = isOpen ? '✕ Đóng' : (isPractice ? '🧪 Bảng Lab' : '⚙️ Menu');
     btn.setAttribute('aria-pressed', String(isOpen));
     btn.title = isOpen
-      ? 'Đóng bảng điều khiển và lab bên phải (phím B)'
-      : 'Mở bảng điều khiển và thông số bên phải (phím B)';
+      ? 'Đóng bảng điều khiển bên phải (phím B)'
+      : 'Mở bảng điều khiển bên phải (phím B)';
   }
   resizeViews();
   panel.resize();
@@ -3721,7 +3699,8 @@ function syncViewUi() {
   if (btnToggleSide) {
     const sideEl = document.querySelector('.side');
     const isOpen = sideEl?.classList.contains('is-open');
-    btnToggleSide.textContent = isOpen ? '✕ Đóng bảng' : '🧪 Thông số & Lab';
+    const isPractice = state.appMode === 'practice';
+    btnToggleSide.textContent = isOpen ? '✕ Đóng' : (isPractice ? '🧪 Bảng Lab' : '⚙️ Menu');
     btnToggleSide.setAttribute('aria-pressed', String(isOpen));
   }
   syncAimAidUi();
