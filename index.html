@@ -15,8 +15,11 @@
 </head>
 <body data-app="practice" data-mode="free">
   <header class="top">
-    <h1>MimePool</h1>
-    <button type="button" id="equipChip" class="equip-chip" aria-haspopup="dialog" aria-controls="sheet" title="Chọn bàn và gậy">
+    <div class="top-brand">
+      <h1>MimePool</h1>
+      <button type="button" id="btnOpenLobby" class="btn-lobby-pill" title="Mở sảnh chọn chế độ chơi (Bot, 1v1 PvP, Hero, Tập)">🎮 Sảnh game</button>
+    </div>
+    <button type="button" id="equipChip" class="equip-chip" aria-haspopup="dialog" aria-controls="sheet" title="Chọn bàn và gậy" hidden>
       <span id="equipChipText">Bàn · Gậy</span>
     </button>
     <nav class="main-modes" id="mainModes" aria-label="Phân khu chơi">
@@ -32,6 +35,9 @@
       <button type="button" data-mode="position">Điều bi cái</button>
       <button type="button" data-mode="squirt">Bù squirt</button>
     </nav>
+    <div class="top-actions">
+      <button type="button" id="btnTopSettings" class="btn-top-settings" title="Cài đặt game (Góc nhìn, Thiết bị, Âm thanh, Camera...)">⚙️ Cài đặt</button>
+    </div>
   </header>
 
   <main class="layout">
@@ -207,7 +213,7 @@
         <!-- Nút Hành Động Trung Tâm -->
         <div class="stage-center-actions">
           <button type="button" id="btnQuickShoot" class="btn-quick-shoot" title="Bắn (hoặc phím Cách)">BẮN</button>
-          <button type="button" id="btnOpenLab" class="btn-open-lab" title="Mở bảng phân tích kỹ thuật & thông số">🧪 Thông số &amp; Lab</button>
+          <button type="button" id="btnBottomSettings" class="btn-open-settings" title="Cài đặt game (Góc nhìn, Thiết bị, Âm thanh, Camera...)">⚙️ Cài đặt</button>
         </div>
 
         <!-- Bánh Xe Vi Chỉnh Góc Ngắm -->
@@ -439,6 +445,120 @@
       </div>
     </section>
   </main>
+
+  <!-- Hộp thoại Cài đặt Game (Game Settings Modal - Ẩn vào Bánh Răng) -->
+  <div id="gameSettingsModal" class="game-settings-modal" hidden>
+    <div class="settings-backdrop" id="settingsBackdrop"></div>
+    <div class="settings-dialog" role="dialog" aria-modal="true" aria-labelledby="settingsDialogTitle">
+      <div class="settings-head">
+        <div class="settings-title-wrap">
+          <span class="settings-icon">⚙️</span>
+          <h2 id="settingsDialogTitle">Cài đặt Game</h2>
+        </div>
+        <button type="button" class="settings-close-btn" id="btnCloseSettings" aria-label="Đóng cài đặt">✕</button>
+      </div>
+      <div class="settings-body">
+        <!-- 1. Góc nhìn & Đồ họa -->
+        <div class="settings-section">
+          <h3 class="settings-sec-title">🎥 Góc nhìn &amp; Camera 3D</h3>
+          <div class="settings-row">
+            <span class="settings-row-label">Góc nhìn</span>
+            <div class="seg-mini" role="group" aria-label="Góc nhìn">
+              <button type="button" data-view="2d" aria-pressed="true" title="Góc nhìn 2D (phím V)">2D</button>
+              <button type="button" data-view="3d" aria-pressed="false" title="Góc nhìn 3D Mắt cơ thủ (phím V)">3D</button>
+            </div>
+          </div>
+          <div class="settings-row" id="settingsCamRow">
+            <span class="settings-row-label">Camera 3D</span>
+            <div class="seg-mini" role="group" aria-label="Camera">
+              <button type="button" data-cam="auto" aria-pressed="true" title="Tự động (phím K/C)">Tự động</button>
+              <button type="button" data-cam="orbit" aria-pressed="false" title="Quay TV (phím K/C)">Quay TV</button>
+              <button type="button" data-cam="follow" aria-pressed="false" title="Theo bi cái (phím K/C)">Theo bi cái</button>
+              <button type="button" data-cam="fixed" aria-pressed="false" title="Cố định (phím K/C)">Cố định</button>
+            </div>
+          </div>
+          <div class="settings-row" id="settingsQualRow">
+            <span class="settings-row-label">Chất lượng 3D</span>
+            <div class="seg-mini" role="group" aria-label="Chất lượng 3D">
+              <button type="button" data-q3d="high" aria-pressed="true">Cao</button>
+              <button type="button" data-q3d="low" aria-pressed="false">Thấp</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. Thiết bị thi đấu -->
+        <div class="settings-section">
+          <h3 class="settings-sec-title">🎱 Thiết bị thi đấu</h3>
+          <div class="settings-row">
+            <div class="settings-equip-info">
+              <span class="settings-equip-text" id="settingsEquipText">Bàn: Club 9ft · Gậy: Fury TK-03</span>
+            </div>
+            <button type="button" class="btn small" id="btnOpenEquipSheet">Đổi Bàn &amp; Gậy</button>
+          </div>
+        </div>
+
+        <!-- 3. Hỗ trợ ngắm bắn (chỉ hiện khi ở Luyện tập) -->
+        <div class="settings-section" id="settingsAimAidSec">
+          <h3 class="settings-sec-title">🎯 Hỗ trợ ngắm bắn</h3>
+          <div class="settings-row">
+            <div class="settings-row-meta">
+              <span class="settings-row-label">Tia ngắm hỗ trợ (Luyện tập)</span>
+              <span class="settings-row-desc">Bật/tắt tia ngắm kéo dài, bi ma và góc phản xạ (phím L).</span>
+            </div>
+            <button type="button" class="btn small primary" id="btnSettingsAimAid" aria-pressed="true">🎯 Đang Bật</button>
+          </div>
+        </div>
+
+        <!-- 4. Âm thanh -->
+        <div class="settings-section">
+          <h3 class="settings-sec-title">🔊 Âm thanh</h3>
+          <div class="settings-row">
+            <div class="settings-row-meta">
+              <span class="settings-row-label">Hiệu ứng âm thanh</span>
+              <span class="settings-row-desc">Tiếng gõ bi, va chạm băng, bi rơi lỗ và âm thanh trận đấu (phím M).</span>
+            </div>
+            <button type="button" class="btn small primary" id="btnSettingsSound" aria-pressed="true">🔊 Đang bật</button>
+          </div>
+        </div>
+
+        <!-- 5. Phân tích & Thông số Lab -->
+        <div class="settings-section">
+          <h3 class="settings-sec-title">🧪 Phân tích &amp; Kỹ thuật chuyên sâu</h3>
+          <div class="settings-row">
+            <div class="settings-row-meta">
+              <span class="settings-row-label">Bảng thông số Lab</span>
+              <span class="settings-row-desc">Mở ngăn kéo phân tích quỹ đạo bi, độ dày, squirt, throw và dữ liệu vật lý (phím B).</span>
+            </div>
+            <button type="button" class="btn small" id="btnSettingsOpenLab">🧪 Mở Bảng Lab</button>
+          </div>
+        </div>
+
+        <!-- 6. Phím tắt điều khiển -->
+        <div class="settings-section">
+          <h3 class="settings-sec-title">⌨️ Phím tắt nhanh</h3>
+          <div class="settings-shortcuts-grid">
+            <div class="shortcut-item"><kbd>←</kbd> <kbd>→</kbd><span>Xoay ngắm (Shift: 1°, Alt: 0.02°)</span></div>
+            <div class="shortcut-item"><kbd>↑</kbd> <kbd>↓</kbd><span>Chỉnh lực bắn (Shift: 5%)</span></div>
+            <div class="shortcut-item"><kbd>Ctrl</kbd> + <kbd>Mũi tên</kbd><span>Chỉnh điểm chạm áp-phê</span></div>
+            <div class="shortcut-item"><kbd>Space</kbd><span>Ra ngọn đánh bi</span></div>
+            <div class="shortcut-item"><kbd>V</kbd><span>Chuyển 2D / 3D</span></div>
+            <div class="shortcut-item"><kbd>K</kbd> / <kbd>C</kbd><span>Đổi góc camera 3D</span></div>
+            <div class="shortcut-item"><kbd>M</kbd><span>Bật / Tắt âm thanh</span></div>
+            <div class="shortcut-item"><kbd>B</kbd><span>Ẩn / Hiện Bảng Lab</span></div>
+          </div>
+        </div>
+
+        <!-- 7. Chế độ chơi & Thoát -->
+        <div class="settings-section">
+          <h3 class="settings-sec-title">🚪 Chế độ chơi</h3>
+          <div class="settings-row">
+            <span class="settings-row-label">Đổi thể thức đấu (Bot, 1v1 PvP, Hero, Tập)</span>
+            <button type="button" class="btn primary small" id="btnSettingsOpenLobby">🏠 Về Sảnh Game</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Thiết bị: chọn bàn + gậy (nội dung dựng bằng src/ui/settings.js) -->
   <div id="sheet" class="sheet" hidden>

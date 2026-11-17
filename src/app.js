@@ -1719,8 +1719,7 @@ function syncBotUi() {
 
   const specHud = document.getElementById('shotSpecHud');
   if (specHud) {
-    const isBotMode = state.mode === 'bot' && !state.lobbyOpen;
-    specHud.hidden = !isBotMode;
+    specHud.hidden = true;
   }
 
   if (state.mode === 'bot') {
@@ -3353,6 +3352,24 @@ const panel = createPanel({
   },
 });
 
+function openSettingsModal() {
+  const modal = document.getElementById('gameSettingsModal');
+  if (!modal) return;
+  modal.hidden = false;
+  const equipEl = document.getElementById('settingsEquipText');
+  if (equipEl && eq) {
+    equipEl.textContent = `${eq.table.name} · ${eq.cue.name}`;
+  }
+  syncAimAidUi?.();
+  syncSoundUi?.();
+  syncViewUi?.();
+}
+
+function closeSettingsModal() {
+  const modal = document.getElementById('gameSettingsModal');
+  if (modal) modal.hidden = true;
+}
+
 arcadeControls = createArcadeControls({
   onPower: (p) => {
     state.power = p;
@@ -3370,6 +3387,7 @@ arcadeControls = createArcadeControls({
     syncTvShotSpecs();
     invalidate();
   },
+  onOpenSettings: openSettingsModal,
 });
 
 const origSetTurnLocked = panel.setTurnLocked;
@@ -3687,11 +3705,18 @@ const sound = createSoundEngine({
 matchFx = createMatchFx({ sound, onTimeout: handleShotTimeout });
 
 function syncSoundUi() {
-  if (!soundBtn) return;
   const on = sound.isEnabled();
-  soundBtn.setAttribute('aria-pressed', String(on));
-  soundBtn.textContent = on ? '🔊' : '🔇';
-  soundBtn.title = on ? 'Tắt âm thanh (phím M)' : 'Bật âm thanh (phím M)';
+  if (soundBtn) {
+    soundBtn.setAttribute('aria-pressed', String(on));
+    soundBtn.textContent = on ? '🔊' : '🔇';
+    soundBtn.title = on ? 'Tắt âm thanh (phím M)' : 'Bật âm thanh (phím M)';
+  }
+  const soundSettingsBtn = document.getElementById('btnSettingsSound');
+  if (soundSettingsBtn) {
+    soundSettingsBtn.setAttribute('aria-pressed', String(on));
+    soundSettingsBtn.textContent = on ? '🔊 Đang bật' : '🔇 Đã tắt';
+    soundSettingsBtn.className = `btn small ${on ? 'primary' : ''}`;
+  }
 }
 
 if (soundBtn) {
@@ -3708,6 +3733,21 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     const on = sound.toggle();
     panel.toast(on ? 'Đã bật âm thanh' : 'Đã tắt âm thanh');
+    return;
+  }
+  if (e.key === 'Escape') {
+    const sModal = document.getElementById('gameSettingsModal');
+    if (sModal && !sModal.hidden) {
+      closeSettingsModal();
+      return;
+    }
+  }
+  if (e.key === 'o' || e.key === 'O') {
+    e.preventDefault();
+    const sModal = document.getElementById('gameSettingsModal');
+    if (sModal && !sModal.hidden) closeSettingsModal();
+    else openSettingsModal();
+    return;
   }
 });
 syncSoundUi();
@@ -3744,6 +3784,14 @@ function syncAimAidUi() {
   if (lobbyBotAim) {
     const parent = lobbyBotAim.closest('.lobby-aim-aid-toggle');
     if (parent) parent.hidden = true;
+  }
+  const btnSettingsAim = document.getElementById('btnSettingsAimAid');
+  const settingsAimSec = document.getElementById('settingsAimAidSec');
+  if (settingsAimSec) settingsAimSec.hidden = !isPractice;
+  if (btnSettingsAim) {
+    btnSettingsAim.setAttribute('aria-pressed', String(on));
+    btnSettingsAim.textContent = on ? '🎯 Đang Bật' : '👁️ Đang Tắt (Thực tế)';
+    btnSettingsAim.className = `btn small ${on ? 'primary' : ''}`;
   }
 }
 
@@ -3901,6 +3949,29 @@ for (const b of qualBtns) b.addEventListener('click', () => setQuality3d(b.datas
 document.getElementById('btnViewAimAid')?.addEventListener('click', toggleAimAid);
 document.getElementById('btnToggleSide')?.addEventListener('click', toggleSidePanel);
 miniCanvas.addEventListener('click', () => setView('2d'));
+
+document.getElementById('btnTopSettings')?.addEventListener('click', openSettingsModal);
+document.getElementById('btnOpenLobby')?.addEventListener('click', () => panel.setLobbyOpen(true));
+document.getElementById('btnCloseSettings')?.addEventListener('click', closeSettingsModal);
+document.getElementById('settingsBackdrop')?.addEventListener('click', closeSettingsModal);
+document.getElementById('btnOpenEquipSheet')?.addEventListener('click', () => {
+  closeSettingsModal();
+  document.getElementById('equipChip')?.click();
+});
+document.getElementById('btnSettingsAimAid')?.addEventListener('click', toggleAimAid);
+document.getElementById('btnSettingsSound')?.addEventListener('click', () => {
+  const on = sound.toggle();
+  panel.toast(on ? 'Đã bật âm thanh' : 'Đã tắt âm thanh');
+});
+document.getElementById('btnSettingsOpenLab')?.addEventListener('click', () => {
+  closeSettingsModal();
+  toggleSidePanel();
+});
+document.getElementById('btnSettingsOpenLobby')?.addEventListener('click', () => {
+  closeSettingsModal();
+  panel.setLobbyOpen(true);
+});
+
 syncViewUi();
 
 /* ------------------------------------------------------------------ start */

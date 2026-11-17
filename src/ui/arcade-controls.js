@@ -11,7 +11,7 @@ import { tipText } from './panel.js';
  *   onTip: (tip) => void,
  * }
  */
-export function createArcadeControls({ onPower, onShoot, onNudge, onTip }) {
+export function createArcadeControls({ onPower, onShoot, onNudge, onTip, onOpenSettings }) {
   const $ = (id) => document.getElementById(id);
 
   let currentPower = 0;
@@ -267,6 +267,7 @@ export function createArcadeControls({ onPower, onShoot, onNudge, onTip }) {
     if (sideBackdrop) sideBackdrop.classList.toggle('is-open', isOpen);
   }
 
+  $('btnBottomSettings')?.addEventListener('click', () => onOpenSettings?.());
   $('btnOpenLab')?.addEventListener('click', () => toggleLabDrawer(true));
   $('btnCloseSideDrawer')?.addEventListener('click', () => toggleLabDrawer(false));
   sideBackdrop?.addEventListener('click', () => toggleLabDrawer(false));
