@@ -319,6 +319,49 @@ test('net client: gives up when the server stays unreachable for the whole windo
   assert.ok(statuses.includes('reconnecting'));
 });
 
+/** Fake socket that never opens. mode 'error-only': fires `error` and stays CONNECTING (Node 22); 'silent': fires nothing. */
+const stuckSocket = (mode, created) =>
+  class {
+    constructor() {
+      this.readyState = 0;
+      this.closed = false;
+      this.listeners = {};
+      created.push(this);
+      if (mode === 'error-only') setTimeout(() => (this.listeners.error || []).forEach((f) => f({})), 5);
+    }
+    addEventListener(t, f) {
+      (this.listeners[t] = this.listeners[t] || []).push(f);
+    }
+    send() {}
+    close() {
+      this.closed = true;
+    }
+  };
+
+for (const mode of ['error-only', 'silent']) {
+  test(`net client: a connect attempt that never fires close (${mode}) still retries, then gives up`, async () => {
+    const created = [];
+    const store = new Map([['bida9-room', JSON.stringify({ code: 'ABCDE', token: 'a'.repeat(32) })]]);
+    const storage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) };
+    const statuses = [];
+    const client = createNetClient({
+      url: 'ws://unused/ws',
+      WebSocketImpl: stuckSocket(mode, created),
+      storage,
+      delays: [10],
+      totalMs: 200,
+      connectTimeoutMs: 30,
+      onStatus: (s) => statuses.push(s),
+    });
+    client.connect();
+    for (let i = 0; i < 100 && client.status !== 'closed'; i++) await pause(10);
+    assert.equal(client.status, 'closed');
+    assert.ok(statuses.includes('reconnecting'));
+    assert.ok(created.length >= 2, `retried (${created.length} attempts)`);
+    assert.ok(created.every((s) => s.closed), 'every failed socket was closed');
+  });
+}
+
 test('analytics id from the environment is injected into index.html, and only a valid one', async () => {
   const get = async (opts) => {
     const srv = await startServer({ port: 0, host: '127.0.0.1', ...opts });

@@ -4,6 +4,7 @@ import { MSG, parseServerMessage } from './protocol.js';
 export const SESSION_KEY = 'bida9-room';
 export const RECONNECT_DELAYS = [1000, 2000, 4000, 8000]; // then 8000 until the deadline
 export const RECONNECT_TOTAL_MS = 60000;
+export const CONNECT_TIMEOUT_MS = 10000; // an attempt that is not open by then counts as failed
 
 export function loadSession(storage = typeof sessionStorage !== 'undefined' ? sessionStorage : null) {
   try {
@@ -16,7 +17,7 @@ export function loadSession(storage = typeof sessionStorage !== 'undefined' ? se
 }
 
 /**
- * opts: { url, onMessage(msg), onStatus(status), WebSocketImpl, storage, delays, totalMs }
+ * opts: { url, onMessage(msg), onStatus(status), WebSocketImpl, storage, delays, totalMs, connectTimeoutMs }
  * status: 'idle' | 'connecting' | 'open' | 'reconnecting' | 'closed'
  * The session ({ code, token, ...extra }) is kept in sessionStorage; while one is set, an unexpected drop reconnects
  * (1s, 2s, 4s, 8s... up to 60s in total) and sends `rejoin` as soon as the socket is open again.
@@ -29,6 +30,7 @@ export function createNetClient({
   storage = typeof sessionStorage !== 'undefined' ? sessionStorage : null,
   delays = RECONNECT_DELAYS,
   totalMs = RECONNECT_TOTAL_MS,
+  connectTimeoutMs = CONNECT_TIMEOUT_MS,
 } = {}) {
   let ws = null;
   let status = 'idle';
@@ -69,8 +71,26 @@ export function createNetClient({
       return;
     }
     ws = sock;
+    // A failed attempt must always end in handleDrop(): browsers fire `error` then `close`, but some runtimes
+    // (Node 22's WebSocket) fire only `error` and stay CONNECTING, and a stalled connect may fire nothing at all.
+    let connTimer = 0;
+    const fail = () => {
+      if (ws !== sock) return; // already handled (or replaced by a newer socket)
+      clearTimeout(connTimer);
+      ws = null;
+      try {
+        sock.close();
+      } catch (e) {
+        /* ignore */
+      }
+      handleDrop();
+    };
+    connTimer = setTimeout(() => {
+      if (sock.readyState !== 1) fail();
+    }, connectTimeoutMs);
     sock.addEventListener('open', () => {
       if (ws !== sock) return;
+      clearTimeout(connTimer);
       attempt = 0;
       const wasReconnect = isReconnect;
       isReconnect = false;
@@ -83,12 +103,10 @@ export function createNetClient({
       const r = parseServerMessage(typeof ev.data === 'string' ? ev.data : String(ev.data));
       if (r.ok) onMessage(r.msg);
     });
-    sock.addEventListener('error', () => {});
-    sock.addEventListener('close', () => {
-      if (ws !== sock) return;
-      ws = null;
-      handleDrop();
+    sock.addEventListener('error', () => {
+      if (sock.readyState !== 1) fail(); // an error while connecting: do not wait for a `close` that may never come
     });
+    sock.addEventListener('close', fail);
   }
 
   function handleDrop() {

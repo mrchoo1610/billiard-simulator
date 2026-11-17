@@ -1,5 +1,5 @@
 // Network-first service worker for fresh app updates with offline cache fallback.
-const CACHE_VERSION = 'bida9-v51';
+const CACHE_VERSION = 'bida9-v52';
 const SHELL = [
   './',
   'index.html',
