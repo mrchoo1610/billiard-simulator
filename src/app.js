@@ -3719,6 +3719,16 @@ function syncSoundUi() {
   }
 }
 
+function toggleTvCompact() {
+  const sb = document.getElementById('tvScoreboard');
+  const btn = document.getElementById('btnToggleTvCompact');
+  if (sb) {
+    const isComp = sb.classList.toggle('is-compact');
+    if (btn) btn.textContent = isComp ? '▲' : '▼';
+    if (btn) btn.title = isComp ? 'Mở rộng bảng điểm (phím T)' : 'Thu gọn bảng điểm (phím T)';
+  }
+}
+
 if (soundBtn) {
   soundBtn.addEventListener('click', () => {
     const on = sound.toggle();
@@ -3733,6 +3743,11 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     const on = sound.toggle();
     panel.toast(on ? 'Đã bật âm thanh' : 'Đã tắt âm thanh');
+    return;
+  }
+  if (e.key === 't' || e.key === 'T') {
+    e.preventDefault();
+    toggleTvCompact();
     return;
   }
   if (e.key === 'Escape') {
@@ -3928,7 +3943,7 @@ async function setView(next) {
   canvas.hidden = is3;
   canvas3d.hidden = !is3;
   miniCanvas.hidden = !is3;
-  opts3d.hidden = !is3;
+  if (opts3d) opts3d.hidden = !is3;
   if (is3) {
     v3.activate();
     mini.resize();
@@ -3950,6 +3965,7 @@ document.getElementById('btnViewAimAid')?.addEventListener('click', toggleAimAid
 document.getElementById('btnToggleSide')?.addEventListener('click', toggleSidePanel);
 miniCanvas.addEventListener('click', () => setView('2d'));
 
+document.getElementById('btnToggleTvCompact')?.addEventListener('click', toggleTvCompact);
 document.getElementById('btnTopSettings')?.addEventListener('click', openSettingsModal);
 document.getElementById('btnOpenLobby')?.addEventListener('click', () => panel.setLobbyOpen(true));
 document.getElementById('btnCloseSettings')?.addEventListener('click', closeSettingsModal);

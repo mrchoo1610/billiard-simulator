@@ -11,7 +11,7 @@
   <title>MimePool – Bida 9 bi &amp; 8 bi online</title>
   <link rel="manifest" href="assets/manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/style.css?v=42">
+  <link rel="stylesheet" href="assets/style.css?v=45">
 </head>
 <body data-app="practice" data-mode="free">
   <header class="top">
@@ -45,36 +45,13 @@
       <canvas id="table" aria-label="Bàn bida"></canvas>
       <canvas id="table3d" aria-label="Bàn bida 3D – góc nhìn mắt cơ thủ" hidden></canvas>
       <canvas id="minimap" class="minimap" title="Chạm để về góc nhìn 2D" aria-label="Bản đồ bàn – chạm để về 2D" hidden></canvas>
-      <div class="view-ctl">
-        <div class="seg-mini" role="group" aria-label="Góc nhìn và âm thanh">
-          <span class="seg-label">Góc nhìn</span>
-          <button type="button" data-view="2d" aria-pressed="true" title="Góc nhìn 2D (phím V)">2D</button>
-          <button type="button" data-view="3d" aria-pressed="false" title="Góc nhìn 3D Mắt cơ thủ (phím V)">3D</button>
-          <button type="button" id="btnViewAimAid" class="aim-aid-btn" aria-pressed="true" title="Bật/tắt tia ngắm hỗ trợ (phím L)">🎯 Tia ngắm</button>
-          <button type="button" id="btnToggleSide" class="side-toggle-btn" title="Ẩn/Hiện bảng điều khiển bên phải (phím B)">📺 Bàn xem</button>
-          <button type="button" id="btnSound" class="sound-btn" aria-pressed="true" title="Bật/tắt âm thanh (phím M)" aria-label="Âm thanh">🔊</button>
-        </div>
-        <div class="v3-opts" id="v3opts" hidden>
-          <div class="seg-mini" role="group" aria-label="Camera">
-            <span class="seg-label">Camera</span>
-            <button type="button" data-cam="auto" aria-pressed="true" title="Trên cao khi bi chạy, về sau bi cái khi bi dừng (phím K)">Tự động</button>
-            <button type="button" data-cam="orbit" aria-pressed="false" title="Góc quay tự động kiểu truyền hình TV (phím K)">Quay TV</button>
-            <button type="button" data-cam="follow" aria-pressed="false" title="Bám theo bi cái (phím K)">Theo bi cái</button>
-            <button type="button" data-cam="fixed" aria-pressed="false" title="Giữ góc nhìn lúc đánh (phím K)">Cố định</button>
-          </div>
-          <div class="seg-mini" role="group" aria-label="Chất lượng 3D">
-            <span class="seg-label">Chất lượng 3D</span>
-            <button type="button" data-q3d="high" aria-pressed="true">Cao</button>
-            <button type="button" data-q3d="low" aria-pressed="false">Thấp</button>
-          </div>
-        </div>
-      </div>
       <div id="pottedTray" class="potted-tray" aria-live="polite" aria-label="Bi đã rơi vào lỗ" hidden></div>
       <div class="v3-load" id="v3load" role="status" hidden>Đang tải 3D…</div>
       <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
       <!-- Bảng điểm Trực tiếp kiểu TV (Live Broadcast Scoreboard) -->
       <div class="tv-scoreboard" id="tvScoreboard" hidden>
+        <button type="button" class="tv-compact-btn" id="btnToggleTvCompact" title="Thu gọn / Mở rộng bảng điểm (phím T)">▼</button>
         <div class="tv-head-bar">
           <div class="tv-live-badge"><span class="tv-red-dot"></span> LIVE</div>
           <div class="tv-game-badge" id="tvGameBadge">9 BI · CHẠM 5</div>
@@ -84,8 +61,8 @@
           <div class="tv-player tv-player-1" id="tvPlayer1">
             <div class="tv-clock-wrap" id="tvClockWrap1" title="Thời gian lượt bắn">
               <svg class="shot-clock-svg" width="28" height="28" viewBox="0 0 28 28">
-                <circle class="shot-clock-bg" cx="14" cy="14" r="11" />
-                <circle class="shot-clock-bar" id="shotClockBar1" cx="14" cy="14" r="11" />
+                <circle class="shot-clock-bg" fill="none" cx="14" cy="14" r="11" />
+                <circle class="shot-clock-bar" id="shotClockBar1" fill="none" cx="14" cy="14" r="11" />
               </svg>
               <span class="tv-avatar-icon" id="tvAvatar1">👤</span>
             </div>
@@ -113,8 +90,8 @@
             </div>
             <div class="tv-clock-wrap" id="tvClockWrap2" title="Thời gian lượt bắn">
               <svg class="shot-clock-svg" width="28" height="28" viewBox="0 0 28 28">
-                <circle class="shot-clock-bg" cx="14" cy="14" r="11" />
-                <circle class="shot-clock-bar" id="shotClockBar2" cx="14" cy="14" r="11" />
+                <circle class="shot-clock-bg" fill="none" cx="14" cy="14" r="11" />
+                <circle class="shot-clock-bar" id="shotClockBar2" fill="none" cx="14" cy="14" r="11" />
               </svg>
               <span class="tv-avatar-icon" id="tvAvatar2">🤖</span>
             </div>
@@ -122,7 +99,6 @@
         </div>
         <div class="tv-balls-bar" id="tvBallsBar" aria-label="Các bi còn lại trên bàn">
           <div class="tv-balls-meta">
-            <span class="tv-balls-tag">BÀN</span>
             <span class="tv-balls-count" id="tvBallsCount">9/9</span>
           </div>
           <div class="tv-balls-list" id="tvBallsList"></div>
@@ -140,44 +116,6 @@
           <div class="callout-text-wrap">
             <span class="callout-title" id="calloutTitle">NICE SHOT!</span>
             <span class="callout-subtitle" id="calloutSubtitle">Ăn bi mục tiêu chính xác</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Thông số Cú đánh Tách riêng (Shot Specs HUD: Điểm chọc bi cái & Lực ô màu gradient) -->
-      <div class="shot-spec-hud" id="shotSpecHud" hidden>
-        <div class="shot-spec-head">
-          <span class="shot-spec-kicker">🎯 THÔNG SỐ CƠ</span>
-          <span class="shot-spec-drag" title="Kéo để di chuyển đến vị trí mong muốn" aria-hidden="true">⠿</span>
-        </div>
-        <div class="shot-spec-body">
-          <div class="shot-spec-tip" title="Điểm chạm cơ vào bi cái (Áp-phê)">
-            <canvas id="specTipCanvas" class="spec-tip-canvas" width="42" height="42" aria-label="Điểm chạm bi cái"></canvas>
-            <div class="spec-tip-meta">
-              <span class="spec-label">ĐIỂM CHẠM</span>
-              <strong class="spec-val" id="specTipLabel">Tâm bi</strong>
-            </div>
-          </div>
-          <div class="shot-spec-divider"></div>
-          <div class="shot-spec-power" title="Lực đánh cơ">
-            <div class="spec-power-head">
-              <span class="spec-label">LỰC CƠ</span>
-              <strong class="spec-power-num" id="specPowerNum">0%</strong>
-            </div>
-            <div class="spec-power-tiles" id="specPowerTiles" aria-label="Thanh lực ô màu gradient">
-              <span class="pw-tile" data-idx="0"></span>
-              <span class="pw-tile" data-idx="1"></span>
-              <span class="pw-tile" data-idx="2"></span>
-              <span class="pw-tile" data-idx="3"></span>
-              <span class="pw-tile" data-idx="4"></span>
-              <span class="pw-tile" data-idx="5"></span>
-              <span class="pw-tile" data-idx="6"></span>
-              <span class="pw-tile" data-idx="7"></span>
-              <span class="pw-tile" data-idx="8"></span>
-              <span class="pw-tile" data-idx="9"></span>
-              <span class="pw-tile" data-idx="10"></span>
-              <span class="pw-tile" data-idx="11"></span>
-            </div>
           </div>
         </div>
       </div>

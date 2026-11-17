@@ -361,8 +361,8 @@ export function createKeyboard({ api, stage, canvas, onLayout = () => {} }) {
     badgeTimer = setTimeout(() => badge.classList.remove('show'), 800);
   }
 
-  /* ---- key hint strip (desktop only, dismissible) ---- */
-  if (desktop) {
+  /* ---- key hint strip (desktop only, dismissible - hidden by default to keep table clean) ---- */
+  if (desktop && false) {
     let dismissed = false;
     try {
       dismissed = localStorage.getItem(HINT_KEY) === '1';
