@@ -293,14 +293,14 @@ test('squirt moves the cue ball sideways; compensating the aim reduces the error
   assert.ok(Math.abs(comp.balls[0].pos.y - 635) < Math.abs(plain.balls[0].pos.y - 635));
 });
 
-test('defaults: cue = Fury TK-03 user cue preset, table = club-9ft', () => {
+test('defaults: cue = standard preset, table = club-9ft', () => {
   const c = defaultCue();
-  assert.equal(c.id, 'user-cue');
-  assert.equal(c.name, 'Fury TK-03');
-  assert.equal(c.shaft, 'low-deflection');
+  assert.equal(c.id, 'standard');
+  assert.equal(c.name, 'Gậy thường');
+  assert.equal(c.shaft, 'standard');
   assert.equal(c.massG, 539);
-  assert.equal(c.squirtDegPerFullSide, cuePreset('low-deflection').squirtDegPerFullSide);
   assert.equal(defaultTable().id, 'club-9ft');
+  assert.equal(cuePreset('user-cue').name, 'Gậy của tôi');
 });
 
 /* ------------------------------------------------------------------ free aim: ray-cast first hit */

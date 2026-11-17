@@ -74,12 +74,18 @@ export function createSettings({ canChange = () => true, blockedMsg = () => 'ƒê·
   const saved = loadEquipment() || {};
 
   let userCue = sanitizeCue({ ...cuePreset('user-cue'), ...(saved.userCue || {}), id: 'user-cue' });
-  if (!userCue.note && userCue.name === USER_CUE_DEFAULT_NAME) userCue.note = cuePreset('user-cue').note;
+  if (userCue.name === 'Fury TK-03' || (!userCue.note && userCue.name === USER_CUE_DEFAULT_NAME)) {
+    if (userCue.name === 'Fury TK-03') userCue.name = USER_CUE_DEFAULT_NAME;
+    userCue.note = cuePreset('user-cue').note;
+  }
   // Phase 4: `ballFriction` changed from an absolute coefficient (~0.06) to a multiplier; drop legacy saved values.
   if (saved.customTable && !('ballFrictionA' in saved.customTable)) delete saved.customTable.ballFriction;
   let customTable = sanitizeTable({ ...tablePreset('custom'), ...(saved.customTable || {}), id: 'custom' });
   let tableId = isTableId(saved.tb) ? saved.tb : DEFAULT_TABLE_ID;
   let cueId = isCueId(saved.cu) ? saved.cu : DEFAULT_CUE_ID;
+  if (cueId === 'user-cue' && (!saved.cu || saved.userCue?.name === 'Fury TK-03' || !saved.userCue)) {
+    cueId = DEFAULT_CUE_ID;
+  }
   let draft = null; // unsaved edited copy of a preset cue: { profile, baseId }
   let tab = 'table';
   let advOpen = { table: false, cue: false };

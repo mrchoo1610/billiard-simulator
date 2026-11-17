@@ -514,7 +514,7 @@ console.log('='.repeat(70));
   const balls = [createBall(0, 450, 600), createBall(1, 1200, 700), createBall(9, 1800, 900)];
   const hash = encodeState({
     balls,
-    cueId: 'fury-tk03',
+    cueId: 'standard',
     tableId: 'club-9ft',
     aimDeg: 42.5,
   });

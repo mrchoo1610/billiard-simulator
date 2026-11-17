@@ -855,6 +855,9 @@ export async function createView3D(host) {
   /* ---------------------------------------------------------------- input (drag / pinch / wheel / tap) */
   const pts = new Map();
   let gestureMoved = false;
+  let lastTapTime = 0;
+  let lastTapX = 0;
+  let lastTapY = 0;
   const poke = () => {
     snapRequested = true;
     host.requestFrame();
@@ -931,7 +934,20 @@ export async function createView3D(host) {
     } catch (err) {
       /* ignore */
     }
-    if (!cancelled && !gestureMoved && pts.size === 0 && p.btn === 0) tapBall(e);
+    if (!cancelled && !gestureMoved && pts.size === 0 && p.btn === 0) {
+      const now = performance.now();
+      if (now - lastTapTime < 340 && Math.hypot(e.clientX - lastTapX, e.clientY - lastTapY) < 36) {
+        // Double tap on tablet / touch screen: reset camera angle behind cue ball
+        orbitYaw = 0;
+        poke();
+        lastTapTime = 0;
+      } else {
+        lastTapTime = now;
+        lastTapX = e.clientX;
+        lastTapY = e.clientY;
+        tapBall(e);
+      }
+    }
   };
   canvas.addEventListener('pointerup', (e) => end(e, false));
   canvas.addEventListener('pointercancel', (e) => end(e, true));

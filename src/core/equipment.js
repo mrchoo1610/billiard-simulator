@@ -12,9 +12,9 @@ export const BALL_MASS_G = 170;
 export const STICK_MIN = 500; // mm/s at power 0
 export const STICK_MAX = 9000; // mm/s at power 1
 export const DEFAULT_TABLE_ID = 'club-9ft';
-export const DEFAULT_CUE_ID = 'user-cue';
-export const USER_CUE_DEFAULT_NAME = 'Fury TK-03';
-export const USER_CUE_NOTE = 'Thông số lấy từ cửa hàng bán lẻ, chưa xác minh với hãng';
+export const DEFAULT_CUE_ID = 'standard';
+export const USER_CUE_DEFAULT_NAME = 'Gậy của tôi';
+export const USER_CUE_NOTE = '';
 
 /* ------------------------------------------------------------------ table presets */
 

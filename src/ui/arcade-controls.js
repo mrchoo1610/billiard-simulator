@@ -108,8 +108,10 @@ export function createArcadeControls({ onPower, onShoot, onNudge, onTip, onOpenS
   // 2. Fine-tune Aim Wheel (Bánh xe vi chỉnh)
   // -------------------------------------------------------------
   const aimWheelDial = $('aimWheelDial');
+  const dialInner = aimWheelDial ? aimWheelDial.querySelector('.aim-wheel-dial-inner') : null;
   let isDraggingWheel = false;
   let wheelLastX = 0;
+  let wheelOffset = 0;
 
   if (aimWheelDial) {
     aimWheelDial.addEventListener('pointerdown', (e) => {
@@ -128,6 +130,8 @@ export function createArcadeControls({ onPower, onShoot, onNudge, onTip, onOpenS
       if (!isDraggingWheel) return;
       const dx = e.clientX - wheelLastX;
       wheelLastX = e.clientX;
+      wheelOffset = (wheelOffset + dx) % 40;
+      if (dialInner) dialInner.style.transform = `translateX(${wheelOffset}px)`;
       // 0.08 degree per pixel of horizontal drag
       const deltaDeg = dx * 0.08;
       if (Math.abs(deltaDeg) > 0.01) {
@@ -138,6 +142,7 @@ export function createArcadeControls({ onPower, onShoot, onNudge, onTip, onOpenS
     const endWheel = (e) => {
       if (!isDraggingWheel) return;
       isDraggingWheel = false;
+      if (dialInner) dialInner.style.transform = 'translateX(0px)';
       try {
         aimWheelDial.releasePointerCapture(e.pointerId);
       } catch (err) {
@@ -156,9 +161,40 @@ export function createArcadeControls({ onPower, onShoot, onNudge, onTip, onOpenS
     }, { passive: false });
   }
 
-  // Aim step buttons (-0.1° and +0.1°)
-  $('btnAimStepLeft')?.addEventListener('click', () => onNudge(-0.1));
-  $('btnAimStepRight')?.addEventListener('click', () => onNudge(0.1));
+  // Aim step buttons (-0.1° and +0.1°) with press & hold continuous nudge for touch screens/tablets
+  function bindStepRepeat(btn, deg) {
+    if (!btn) return;
+    let timer = null;
+    let interval = null;
+
+    const start = (e) => {
+      if (locked) return;
+      onNudge(deg);
+      clearTimeout(timer);
+      clearInterval(interval);
+      timer = setTimeout(() => {
+        interval = setInterval(() => {
+          if (!locked) onNudge(deg);
+        }, 50);
+      }, 250);
+    };
+
+    const stop = () => {
+      clearTimeout(timer);
+      clearInterval(interval);
+      timer = null;
+      interval = null;
+    };
+
+    btn.addEventListener('pointerdown', start);
+    btn.addEventListener('pointerup', stop);
+    btn.addEventListener('pointercancel', stop);
+    btn.addEventListener('pointerleave', stop);
+    btn.addEventListener('contextmenu', (e) => e.preventDefault());
+  }
+
+  bindStepRepeat($('btnAimStepLeft'), -0.1);
+  bindStepRepeat($('btnAimStepRight'), 0.1);
 
   // -------------------------------------------------------------
   // 3. Floating Spin Button & Popover

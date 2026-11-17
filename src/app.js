@@ -158,6 +158,7 @@ const renderer = createRenderer(canvas);
 const canvas3d = document.getElementById('table3d');
 const miniCanvas = document.getElementById('minimap');
 const STROKE_MS = 120;
+let desiredView = lsRead('bida9-view') === '2d' ? '2d' : '3d';
 let view = '2d';
 let v3 = null; // render3d instance
 let mini = null; // 2D renderer on the minimap canvas
@@ -358,6 +359,10 @@ function rescaleLayout(sx, sy) {
 function onEquipmentChange(next) {
   const nextKey = physicsEquipmentKey(next);
   eq = next;
+  const equipEl = document.getElementById('settingsEquipText');
+  if (equipEl && next) {
+    equipEl.textContent = `${next.table.name} · ${next.cue.name}`;
+  }
   if (nextKey === eqKey) {
     // Metadata or visual-only cue/table change (e.g. name, hardness, shaft): still redraw stick
     invalidate({ pred: false });
@@ -3846,7 +3851,8 @@ function toggleSidePanel() {
 }
 
 function syncViewUi() {
-  for (const b of viewBtns) b.setAttribute('aria-pressed', String(b.dataset.view === view));
+  const curView = v3 ? view : desiredView;
+  for (const b of viewBtns) b.setAttribute('aria-pressed', String(b.dataset.view === curView));
   for (const b of camBtns) b.setAttribute('aria-pressed', String(b.dataset.cam === camMode));
   const q = v3 ? v3.getQuality() : quality3d || 'high';
   for (const b of qualBtns) b.setAttribute('aria-pressed', String(b.dataset.q3d === q));
@@ -3895,6 +3901,7 @@ function tapBall3d(id) {
 
 async function setView(next) {
   if (next === view || v3Loading) return;
+  desiredView = next;
   if (next === '3d') {
     v3Loading = true;
     load3d.hidden = false;
@@ -3929,7 +3936,9 @@ async function setView(next) {
     } catch (e) {
       v3 = null;
       mini = null;
+      desiredView = '2d';
       lsWrite('bida9-view', '2d');
+      syncViewUi();
       panel.toast('Thiết bị không hỗ trợ 3D', 'bad');
       return;
     } finally {
@@ -4031,4 +4040,4 @@ panel.updateStats(stats);
 renderer.resize();
 initDraggableHud();
 invalidate();
-if (lsRead('bida9-view') === '3d') setView('3d');
+if (desiredView === '3d') setView('3d');

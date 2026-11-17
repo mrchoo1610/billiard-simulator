@@ -113,12 +113,12 @@ Mã nguồn 3D: `src/ui/render3d.js` (tải lười), phần tính toán thuần
 
 ### Chọn bàn và gậy (Thiết bị)
 
-Bấm nút trên thanh đầu trang (ví dụ "Bàn: Club 9ft · Gậy: Fury TK-03") để mở bảng **Thiết bị**:
+Bấm nút trên thanh đầu trang (ví dụ "Bàn: Club 9ft · Gậy: Gậy thường") để mở bảng **Thiết bị**:
 
 - Tab **Bàn**: Pro 9ft (vải nhanh, lỗ hẹp), Club 9ft (mặc định), Quán 7ft (vải chậm, lỗ rộng), Tuỳ chỉnh. Đổi kích thước bàn (7/8/9 ft) sẽ co giãn vị trí bi theo tỉ lệ. Miệng lỗ quyết định khe hở trên băng và bán kính hút của lỗ.
-- Tab **Gậy**: Gậy thường, Ngọn LD, Ngọn carbon, Gậy phá bi và **Gậy của tôi** (mặc định tên "Fury TK-03", mặc định gậy được chọn).
+- Tab **Gậy**: Gậy thường (mặc định được chọn), Ngọn LD, Ngọn carbon, Gậy phá bi và **Gậy của tôi** (tùy chỉnh được).
 - Mục **Nâng cao** có thanh trượt cho mọi thông số. Sửa gậy có sẵn sẽ tạo bản nháp, bấm **Lưu thành gậy của tôi** để giữ lại (đổi tên được).
-- Mọi thông số là **ước lượng để luyện tập**, không phải số đo thực tế. Thông số Fury TK-03 lấy từ cửa hàng bán lẻ, chưa xác minh với hãng.
+- Mọi thông số là **ước lượng để luyện tập**, không phải số đo thực tế.
 - Thông tin cú đánh hiện "Bù squirt: x,x°" khi có effet; đường cam nét đứt là đường bi cái thực tế sau squirt, đường trắng là đường ngắm.
 
 ## 1 vs 1 Online

@@ -1,7 +1,7 @@
 # Báo cáo kiểm tra vật lý (physics audit)
 
 Sinh bởi `scripts/physics-audit.mjs` (chạy: `npm run audit`) vào 2026-11-16. Tiêu chí: `docs/physics-criteria.md`.
-Thiết bị đo: bàn Club 9ft, gậy mặc định (Fury TK-03) trừ khi ghi chú khác; các thông số là ước lượng, **không được chỉnh để đạt tiêu chí**.
+Thiết bị đo: bàn Club 9ft, gậy mặc định (Gậy thường) trừ khi ghi chú khác; các thông số là ước lượng, **không được chỉnh để đạt tiêu chí**.
 Quy ước trạng thái: ĐẠT = trong dung sai của tiêu chí; MỘT PHẦN = trong 2× dung sai hoặc đúng chiều nhưng chưa kiểm hết; KHÔNG ĐẠT = ngoài khoảng đó hoặc sai chiều; CHƯA HỖ TRỢ = ngoài phạm vi mô hình (mục E).
 Giá trị kỳ vọng trong tiêu chí là **[Unverified]** (xem đầu `physics-criteria.md`, Bản 2). Kỳ vọng phụ thuộc e dùng E_BALL của engine và `cushionRestitution` của bàn đang đo.
 

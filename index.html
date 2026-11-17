@@ -2,7 +2,7 @@
 <html lang="vi">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
   <meta name="theme-color" content="#0b6e4f">
   <!-- Usage analytics id: left empty in the repository. The Node server fills it in from the GA_MEASUREMENT_ID
        environment variable when it serves this page (see server/index.mjs). Empty = analytics off. -->
@@ -11,7 +11,7 @@
   <title>MimePool – Bida 9 bi &amp; 8 bi online</title>
   <link rel="manifest" href="assets/manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/style.css?v=46">
+  <link rel="stylesheet" href="assets/style.css?v=47">
 </head>
 <body data-app="practice" data-mode="free">
   <header class="top">
@@ -389,8 +389,8 @@
           <div class="settings-row">
             <span class="settings-row-label">Góc nhìn</span>
             <div class="seg-mini" role="group" aria-label="Góc nhìn">
-              <button type="button" data-view="2d" aria-pressed="true" title="Góc nhìn 2D (phím V)">2D</button>
-              <button type="button" data-view="3d" aria-pressed="false" title="Góc nhìn 3D Mắt cơ thủ (phím V)">3D</button>
+              <button type="button" data-view="2d" aria-pressed="false" title="Góc nhìn 2D (phím V)">2D</button>
+              <button type="button" data-view="3d" aria-pressed="true" title="Góc nhìn 3D Mắt cơ thủ (phím V)">3D</button>
             </div>
           </div>
           <div class="settings-row" id="settingsCamRow">
@@ -416,7 +416,7 @@
           <h3 class="settings-sec-title">🎱 Thiết bị thi đấu</h3>
           <div class="settings-row">
             <div class="settings-equip-info">
-              <span class="settings-equip-text" id="settingsEquipText">Bàn: Club 9ft · Gậy: Fury TK-03</span>
+              <span class="settings-equip-text" id="settingsEquipText">Club 9ft · Gậy thường</span>
             </div>
             <button type="button" class="btn small" id="btnOpenEquipSheet">Đổi Bàn &amp; Gậy</button>
           </div>
@@ -706,6 +706,6 @@
     </div>
   </div>
 
-  <script type="module" src="src/app.js?v=37"></script>
+  <script type="module" src="src/app.js?v=39"></script>
 </body>
 </html>

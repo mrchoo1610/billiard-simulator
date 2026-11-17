@@ -480,7 +480,7 @@ const lines = [];
 lines.push('# Báo cáo kiểm tra vật lý (physics audit)');
 lines.push('');
 lines.push(`Sinh bởi \`scripts/physics-audit.mjs\` (chạy: \`npm run audit\`) vào ${new Date().toISOString().slice(0, 10)}. Tiêu chí: \`docs/physics-criteria.md\`.`);
-lines.push('Thiết bị đo: bàn Club 9ft, gậy mặc định (Fury TK-03) trừ khi ghi chú khác; các thông số là ước lượng, **không được chỉnh để đạt tiêu chí**.');
+lines.push('Thiết bị đo: bàn Club 9ft, gậy mặc định (Gậy thường) trừ khi ghi chú khác; các thông số là ước lượng, **không được chỉnh để đạt tiêu chí**.');
 lines.push('Quy ước trạng thái: ĐẠT = trong dung sai của tiêu chí; MỘT PHẦN = trong 2× dung sai hoặc đúng chiều nhưng chưa kiểm hết; KHÔNG ĐẠT = ngoài khoảng đó hoặc sai chiều; CHƯA HỖ TRỢ = ngoài phạm vi mô hình (mục E).');
 lines.push('Giá trị kỳ vọng trong tiêu chí là **[Unverified]** (xem đầu `physics-criteria.md`, Bản 2). Kỳ vọng phụ thuộc e dùng E_BALL của engine và `cushionRestitution` của bàn đang đo.');
 lines.push('');
