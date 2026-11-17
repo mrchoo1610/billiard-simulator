@@ -1,0 +1,36 @@
+# MimePool with Docker Compose. Values come from a .env file next to this file (see .env.example).
+#
+# Local build and run:        docker compose up --build
+# Server (image from CI):     docker compose pull app && docker compose up -d
+# With the tunnel container:  docker compose --profile tunnel up -d
+name: mimepool
+
+services:
+  app:
+    image: ${IMAGE:-mimepool:local}
+    build: .
+    restart: unless-stopped
+    environment:
+      HOST: 0.0.0.0
+      PORT: ${PORT:-28787}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+      GA_MEASUREMENT_ID: ${GA_MEASUREMENT_ID:-}
+    ports:
+      # published on the loopback interface only: reachable by a cloudflared running on the host, not from outside
+      - "127.0.0.1:${PORT:-28787}:${PORT:-28787}"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+  # Optional: run the Cloudflare Tunnel as a container too (dashboard-managed tunnel, token in .env).
+  # In the Cloudflare dashboard point the Public Hostname at http://app:28787
+  cloudflared:
+    profiles: [tunnel]
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      - app

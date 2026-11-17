@@ -1,0 +1,17 @@
+.git
+.github
+.claude
+node_modules
+tests
+docs
+scripts
+tmp
+dist
+build
+*.log
+.env
+.env.*
+PLAN.md
+README.md
+Dockerfile
+docker-compose.yml

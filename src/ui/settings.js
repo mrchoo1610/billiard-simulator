@@ -66,10 +66,10 @@ const fmt = (v, d = 0) => Number(v).toFixed(d).replace('.', ',');
 /* ------------------------------------------------------------------ controller */
 
 /**
- * opts: { canChange(): boolean, onChange({table, cue}, prev), toast(msg, kind) }
- * Returns { get, ids, applyIds, open, close }.
+ * opts: { canChange(): boolean, blockedMsg(): string (toast when canChange() is false), onChange({table, cue}, prev), toast(msg, kind) }
+ * Returns { get, ids, applyIds, open, close, setChipOverride }.
  */
-export function createSettings({ canChange = () => true, onChange = () => {}, toast = () => {} } = {}) {
+export function createSettings({ canChange = () => true, blockedMsg = () => 'Đợi bi dừng rồi hãy đổi thiết bị', onChange = () => {}, toast = () => {} } = {}) {
   const $ = (id) => document.getElementById(id);
   const saved = loadEquipment() || {};
 
@@ -119,7 +119,7 @@ export function createSettings({ canChange = () => true, onChange = () => {}, to
   /** Returns false (and tells the user) when equipment cannot change right now. */
   function guard() {
     if (canChange()) return true;
-    toast('Đợi bi dừng rồi hãy đổi thiết bị', 'warn');
+    toast(blockedMsg(), 'warn');
     return false;
   }
 
@@ -395,7 +395,7 @@ export function createSettings({ canChange = () => true, onChange = () => {}, to
   function open(which) {
     if (!hasDom) return;
     if (!canChange()) {
-      toast('Đợi bi dừng rồi hãy đổi thiết bị', 'warn');
+      toast(blockedMsg(), 'warn');
       return;
     }
     if (which === 'table' || which === 'cue') tab = which;
@@ -453,5 +453,15 @@ export function createSettings({ canChange = () => true, onChange = () => {}, to
     },
     open,
     close,
+    /** Show a fixed label on the equipment chip (online match uses fixed equipment); null restores the saved one. */
+    setChipOverride(text) {
+      if (!chipText) return;
+      if (text) {
+        chipText.textContent = text;
+        chipEl.setAttribute('aria-label', text);
+      } else {
+        refreshChip();
+      }
+    },
   };
 }
