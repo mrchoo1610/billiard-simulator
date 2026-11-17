@@ -101,7 +101,7 @@ const state = {
   aimMode: 'auto', // 'auto' (ghost ball to target/pocket) | 'manual' (free aim at aimAngle)
   aimAngle: 0, // manual aim direction, degrees in world coordinates (atan2(y, x))
   aimAid: lsRead('bida9-aim-aid') !== '0', // true = assistance lines, false = realistic view (no aid lines)
-  overlays: { aim: true, actual: true, ghost: true, pocket: true, tangent: true, roll: false, predict: true },
+  overlays: { aim: true, actual: true, ghost: true, pocket: true, tangent: true, roll: true, predict: true },
   appMode: 'practice', // 'bot' | 'practice'
   practiceMode: 'free',
   lobbyOpen: false,
@@ -391,10 +391,25 @@ function effOverlays() {
     return { aim: false, actual: false, ghost: false, pocket: false, tangent: false, roll: false, predict: false };
   }
   const o = state.overlays;
+  // 1. Chế độ bắn tập (Practice / Free mode): Full các option (tia ngắm, góc bi ra, dự đoán hướng bi)
+  if (state.appMode === 'practice' && state.mode === 'free') {
+    return {
+      aim: !!o.aim,
+      actual: !!o.actual,
+      ghost: !!o.ghost,
+      pocket: !!o.pocket,
+      tangent: !!o.tangent,
+      roll: !!o.roll,
+      predict: !!o.predict,
+    };
+  }
+
+  // 2. Các chế độ khác (Đấu Bot, Hero, 1v1 Online PvP, Đấu 2 Bot BvB, Bài tập kỹ năng):
+  // Chỉ có các option cơ bản: đường ngắm (aim), bi ma (ghost), hướng vào lỗ (pocket).
+  // Không có góc bi ra (tangent/roll = false) và dự đoán hướng bi (predict = false), actual = false.
   if (state.mode === 'bot') {
     if (isPvpMode()) {
-      const aid = botAidFor('medium');
-      return { aim: aid.aim, actual: false, ghost: aid.ghost, pocket: aid.pocket, tangent: aid.tangent, roll: false, predict: false };
+      return { aim: true, actual: false, ghost: true, pocket: true, tangent: false, roll: false, predict: false };
     }
     if (isBotTurn()) {
       if (isBvbMode()) {
@@ -402,12 +417,12 @@ function effOverlays() {
         const aid = botAidFor(diff);
         return {
           aim: true,
-          actual: true,
+          actual: false,
           ghost: aid.ghost,
           pocket: aid.pocket,
-          tangent: aid.tangent,
+          tangent: false,
           roll: false,
-          predict: true,
+          predict: false,
         };
       }
       return { aim: false, actual: false, ghost: false, pocket: false, tangent: false, roll: false, predict: false };
@@ -418,18 +433,19 @@ function effOverlays() {
       actual: false,
       ghost: aid.ghost,
       pocket: aid.pocket,
-      tangent: aid.tangent,
+      tangent: false,
       roll: false,
       predict: false,
     };
   }
   if (state.mode === 'thickness') {
     const v = state.revealed;
-    return { aim: v, actual: false, ghost: v, pocket: v, tangent: v, roll: false, predict: false };
+    return { aim: v, actual: false, ghost: v, pocket: v, tangent: false, roll: false, predict: false };
   }
-  if (state.mode === 'position') return { ...o, predict: false };
-  if (state.mode === 'squirt') return { ...o, predict: false, actual: o.actual && state.revealed };
-  return o;
+  if (state.mode === 'position' || state.mode === 'squirt') {
+    return { ...o, actual: false, tangent: false, roll: false, predict: false };
+  }
+  return { aim: !!o.aim, actual: false, ghost: !!o.ghost, pocket: !!o.pocket, tangent: false, roll: false, predict: false };
 }
 
 /** Elevation drills (thickness / position / squirt) keep the default cue; otherwise the player raises the cue; the bot uses its own. */
@@ -1926,6 +1942,13 @@ function enterBvbMode(opts = {}) {
   trackMatchStart();
 }
 
+function syncOverlayCheckboxes() {
+  for (const cb of document.querySelectorAll('[data-ov]')) {
+    const k = cb.dataset.ov;
+    if (k in state.overlays) cb.checked = !!state.overlays[k];
+  }
+}
+
 function enterPracticeMode(subMode = state.practiceMode, opts = {}) {
   leavePvpIfNeeded();
   if (!isAimReady()) return;
@@ -1936,6 +1959,16 @@ function enterPracticeMode(subMode = state.practiceMode, opts = {}) {
   panel.setLobbyOpen(false);
   panel.setAppMode('practice');
   panel.setTurnLocked(false);
+  state.overlays = {
+    aim: true,
+    actual: true,
+    ghost: true,
+    pocket: true,
+    tangent: true,
+    roll: true,
+    predict: true,
+  };
+  syncOverlayCheckboxes();
   const nextSub = subMode === 'bot' ? 'free' : subMode || 'free';
   state.practiceMode = nextSub;
   if (state.mode === nextSub && opts.keepBoard) {

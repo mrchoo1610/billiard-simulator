@@ -222,7 +222,7 @@ test('bot difficulties scale aim aids down and bot skill up from easy to pro', (
 
   assert.equal(easyAid.ghost, true);
   assert.equal(easyAid.pocket, true);
-  assert.equal(easyAid.tangent, true);
+  assert.equal(easyAid.tangent, false);
   assert.ok(easyAid.objLineLen > medAid.objLineLen);
 
   assert.equal(medAid.ghost, true);
@@ -590,4 +590,11 @@ test('Bot & BvB: Realistic view (no aim lines) & Auto-orbit camera mode', () => 
     angle += dt * 0.35;
   }
   assert.ok(Math.abs(angle - 0.35) < 1e-4, 'Auto-orbit integrates smoothly over 1 second');
+});
+
+test('Overlay rules: Practice mode has full aim aids, other modes keep basic aids only', () => {
+  for (const diff of ['easy', 'medium', 'hard', 'pro', 'hero']) {
+    const aid = botAidFor(diff);
+    assert.equal(aid.tangent, false, `${diff} must not have tangent angle aid`);
+  }
 });

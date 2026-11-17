@@ -10,7 +10,7 @@ export const BOT_DIFFICULTIES = {
     id: 'easy',
     label: 'Dễ',
     shortLabel: 'Dễ',
-    desc: 'Đủ tia bi ảo + tiếp tuyến · Bot ngắm lệch nhẹ',
+    desc: 'Tia ngắm cơ bản + bi ma · Bot ngắm lệch nhẹ',
     aimJitterDeg: 2.8,
     safeJitterScale: 1.35,
     breakPower: 0.84,
@@ -18,7 +18,7 @@ export const BOT_DIFFICULTIES = {
     useSpin: false,
     proSpin: false,
     checkScratch: false,
-    playerAid: { aim: true, ghost: true, pocket: true, tangent: true, objLineLen: 500, maxAimLen: 4000, simpleAim: false },
+    playerAid: { aim: true, ghost: true, pocket: true, tangent: false, objLineLen: 500, maxAimLen: 4000, simpleAim: false },
   },
   medium: {
     id: 'medium',
