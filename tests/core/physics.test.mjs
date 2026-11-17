@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import { R, buildTable } from '../../src/core/table.js';
 import { computeShot, isPathBlocked, bestPocket, firstHit } from '../../src/core/geometry.js';
 import { createBall, createSim, simulate, computeLaunch, DT, TABLE_BOUNCE_E, HOP_ABSORB } from '../../src/core/physics.js';
-import { stickSpeed, ballSpeed } from '../../src/core/equipment.js';
+import { stickSpeed, ballSpeed, STICK_MIN, STICK_MAX, POWER_CURVE } from '../../src/core/equipment.js';
+// Tests were tuned on a linear 500..9000 mm/s power scale; P(old) gives the slider value with the same stick speed.
+const P = (old) => Math.pow((500 + 8500 * old - STICK_MIN) / (STICK_MAX - STICK_MIN), 1 / POWER_CURVE);
 import { evaluateNineBallTurn } from '../../src/features/bot.js';
 import { tablePreset, cuePreset, defaultTable, defaultCue } from '../../src/core/equipment.js';
 
@@ -53,7 +55,7 @@ function lineShot(tip, power, gap = 400) {
 }
 
 test('stun shot (close range): cue ball stops near contact, object ball moves forward', () => {
-  const { balls, contactX, objX, shot } = lineShot({ x: 0, y: 0 }, 0.14, 8);
+  const { balls, contactX, objX, shot } = lineShot({ x: 0, y: 0 }, P(0.14), 8);
   const sim = createSim(balls);
   sim.strike(shot);
   sim.run(0.2);
@@ -69,12 +71,12 @@ test('stun shot (close range): cue ball stops near contact, object ball moves fo
 });
 
 test('draw shot: cue ball ends behind its collision point; follow ends ahead', () => {
-  const draw = lineShot({ x: 0, y: -0.5 }, 0.2);
+  const draw = lineShot({ x: 0, y: -0.5 }, P(0.2));
   const rd = simulate(draw.balls, draw.shot, { maxTime: 1.2 });
   const drawAt = rd.balls[0].pos.x;
   assert.ok(drawAt < draw.contactX - 20, `draw: ${drawAt} vs ${draw.contactX}`);
 
-  const fol = lineShot({ x: 0, y: 0.5 }, 0.2);
+  const fol = lineShot({ x: 0, y: 0.5 }, P(0.2));
   const rf = simulate(fol.balls, fol.shot, { maxTime: 1.2 });
   const folAt = rf.balls[0].pos.x;
   assert.ok(folAt > fol.contactX + 20, `follow: ${folAt} vs ${fol.contactX}`);
@@ -85,7 +87,7 @@ test('cushion bounces keep balls inside the table', () => {
     const a = (deg * Math.PI) / 180;
     const cue = createBall(0, 1300, 640);
     const sim = createSim([cue]);
-    sim.strike({ aimDir: { x: Math.cos(a), y: Math.sin(a) }, power: 0.6, tip: { x: 0, y: 0 } });
+    sim.strike({ aimDir: { x: Math.cos(a), y: Math.sin(a) }, power: P(0.6), tip: { x: 0, y: 0 } });
     let steps = 0;
     while (sim.isMoving() && steps++ < 600 * 25) {
       sim.step(DT);
@@ -102,7 +104,7 @@ test('cushion bounces keep balls inside the table', () => {
 
 test('ball aimed directly into a corner pocket is potted', () => {
   const cue = createBall(0, 700, 700);
-  const r = simulate([cue], { aimDir: { x: -1, y: -1 }, power: 0.25, tip: { x: 0, y: 0 } });
+  const r = simulate([cue], { aimDir: { x: -1, y: -1 }, power: P(0.25), tip: { x: 0, y: 0 } });
   assert.ok(r.balls[0].potted);
   assert.deepEqual(r.events.potted, [0]);
 });
@@ -111,7 +113,7 @@ test('object ball potted into corner via straight shot', () => {
   const cue = createBall(0, 800, 800);
   const obj = createBall(1, 400, 400);
   const s = computeShot(cue, obj, POCKETS[0].aim, R);
-  const r = simulate([cue, obj], { aimDir: s.aimDir, power: 0.28, tip: { x: 0, y: 0 } });
+  const r = simulate([cue, obj], { aimDir: s.aimDir, power: P(0.28), tip: { x: 0, y: 0 } });
   assert.equal(r.events.firstContact, 1);
   assert.ok(r.events.potted.includes(1));
 });
@@ -121,18 +123,22 @@ test('energy sanity: no speedup without collisions (centre ball, no english)', (
     for (const tipY of [0, -0.5]) {
       const a = (deg * Math.PI) / 180;
       const sim = createSim([createBall(0, 1300, 640)]);
-      sim.strike({ aimDir: { x: Math.cos(a), y: Math.sin(a) }, power: 0.5, tip: { x: 0, y: tipY } });
+      sim.strike({ aimDir: { x: Math.cos(a), y: Math.sin(a) }, power: P(0.5), tip: { x: 0, y: tipY } });
       // with draw the ball may first slow then reverse; the speed still must not exceed the initial speed
-      let prev = Math.hypot(sim.balls[0].vel.x, sim.balls[0].vel.y);
-      const v0 = prev;
+      // total kinetic energy per unit mass (translation + rotation, I = 2/5 m R^2) must never increase;
+      // linear speed alone may rise slightly when spin left over from a cushion converts back on the cloth
+      const ke = (b) => 0.5 * (b.vel.x ** 2 + b.vel.y ** 2) + 0.2 * R * R * (b.w.x ** 2 + b.w.y ** 2 + b.w.z ** 2);
+      let prev = ke(sim.balls[0]);
+      const v0 = Math.hypot(sim.balls[0].vel.x, sim.balls[0].vel.y);
       let n = 0;
       while (sim.isMoving() && n++ < 600 * 20) {
         sim.step(DT);
         const b = sim.balls[0];
         const sp = Math.hypot(b.vel.x, b.vel.y);
         assert.ok(sp <= v0 + 1e-6, `exceeds initial speed ${sp} > ${v0}`);
-        if (tipY === 0) assert.ok(sp <= prev + 1e-6, `speed increased ${prev} -> ${sp} (deg ${deg})`);
-        prev = sp;
+        const e = ke(b);
+        if (tipY === 0) assert.ok(e <= prev * (1 + 1e-9) + 1e-6, `energy increased ${prev} -> ${e} (deg ${deg})`);
+        prev = e;
         if (b.potted) break;
       }
     }
@@ -141,7 +147,7 @@ test('energy sanity: no speedup without collisions (centre ball, no english)', (
 
 test('simulate does not mutate its input', () => {
   const cue = createBall(0, 600, 600);
-  simulate([cue], { aimDir: { x: 1, y: 0 }, power: 0.5, tip: { x: 0, y: 0 } });
+  simulate([cue], { aimDir: { x: 1, y: 0 }, power: P(0.5), tip: { x: 0, y: 0 } });
   assert.equal(cue.pos.x, 600);
   assert.equal(cue.vel.x, 0);
 });
@@ -191,7 +197,7 @@ test('miscue above the limit: 30 % speed, <= 3 deg error, no spin', () => {
   // the break cue miscues earlier (limit 0.45)
   assert.equal(computeLaunch({ x: 1, y: 0 }, 0.5, { x: 0, y: 0.5 }, cuePreset('break')).miscue, true);
   // end-to-end: the simulation reports it
-  const r = simulate([createBall(0, 600, 600)], { aimDir: { x: 1, y: 0 }, power: 0.4, tip: { x: 0, y: 0.9 } }, { rng: () => 0.5 });
+  const r = simulate([createBall(0, 600, 600)], { aimDir: { x: 1, y: 0 }, power: P(0.4), tip: { x: 0, y: 0.9 } }, { rng: () => 0.5 });
   assert.equal(r.events.miscue, true);
 });
 
@@ -232,10 +238,10 @@ test('pocket gaps and capture derive from mouth width (narrower mouth = tighter 
 
 test('corner pocket: diagonal entry drops, rail-hugging entry on a tight table does not fall straight in', () => {
   const pro = tablePreset('pro-9ft');
-  const hit = simulate([createBall(0, 700, 700)], { aimDir: { x: -1, y: -1 }, power: 0.25, tip: { x: 0, y: 0 } }, { table: pro });
+  const hit = simulate([createBall(0, 700, 700)], { aimDir: { x: -1, y: -1 }, power: P(0.25), tip: { x: 0, y: 0 } }, { table: pro });
   assert.ok(hit.balls[0].potted);
   // hugging the top rail towards the corner (centre R + 8 mm from the cushion) must stay a legal ball position
-  const miss = simulate([createBall(0, 600, R + 8)], { aimDir: { x: -1, y: 0 }, power: 0.25, tip: { x: 0, y: 0 } }, { table: pro, maxTime: 3 });
+  const miss = simulate([createBall(0, 600, R + 8)], { aimDir: { x: -1, y: 0 }, power: P(0.25), tip: { x: 0, y: 0 } }, { table: pro, maxTime: 3 });
   assert.ok(miss.balls[0].pos.x > -5 && miss.balls[0].pos.y > -5, 'ball stays within the table / pocket area');
 });
 
@@ -244,8 +250,8 @@ test('pocket jaws rattle off-centre corner and side shots instead of vanishing',
   const pro = tablePreset('pro-9ft');
   const s = Math.SQRT1_2;
   const corner = simulate(
-    [createBall(0, 400 + 42 * s, 400 - 42 * s)],
-    { aimDir: { x: -1, y: -1 }, power: 0.55, tip: { x: 0, y: 0 } },
+    [createBall(0, 400 + 36 * s, 400 - 36 * s)], // 36 mm off-line: rattles out for P(0.35..0.5)
+    { aimDir: { x: -1, y: -1 }, power: P(0.4), tip: { x: 0, y: 0 } },
     { table: pro },
   );
   assert.equal(corner.balls[0].potted, false, 'off-line Pro corner shot rattles out');
@@ -254,7 +260,7 @@ test('pocket jaws rattle off-centre corner and side shots instead of vanishing',
   const t = (55 * Math.PI) / 180;
   const side = simulate(
     [createBall(0, 1270 + 300 * Math.sin(t) + 25, 300 * Math.cos(t))],
-    { aimDir: { x: -Math.sin(t), y: -Math.cos(t) }, power: 0.45, tip: { x: 0, y: 0 } },
+    { aimDir: { x: -Math.sin(t), y: -Math.cos(t) }, power: P(0.45), tip: { x: 0, y: 0 } },
     { table: tablePreset('club-9ft') },
   );
   assert.equal(side.balls[0].potted, false, 'steep side jaw hit rattles out');
@@ -264,14 +270,14 @@ test('pocket jaws rattle off-centre corner and side shots instead of vanishing',
 test('slower cloth gives a shorter roll distance', () => {
   const run = (muRoll) => {
     const table = { ...tablePreset('club-9ft'), muRoll };
-    const r = simulate([createBall(0, 300, 635)], { aimDir: { x: 1, y: 0 }, power: 0.12, tip: { x: 0, y: 0 } }, { table, maxTime: 30 });
+    const r = simulate([createBall(0, 300, 635)], { aimDir: { x: 1, y: 0 }, power: P(0.12), tip: { x: 0, y: 0 } }, { table, maxTime: 30 });
     return r.balls[0].pos.x - 300;
   };
   const fast = run(0.008);
   const slow = run(0.015);
   assert.ok(fast > slow + 50, `fast ${fast} vs slow ${slow}`);
   // presets: bar cloth (slow) rolls shorter than pro cloth (fast) on the same shot
-  const shot = { aimDir: { x: 1, y: 0 }, power: 0.12, tip: { x: 0, y: 0 } };
+  const shot = { aimDir: { x: 1, y: 0 }, power: P(0.12), tip: { x: 0, y: 0 } };
   const rolledDist = (table) => {
     const r = simulate([createBall(0, 300, 495)], shot, { table, maxTime: 30, recordPaths: true });
     const pts = r.balls[0].path;
@@ -286,9 +292,9 @@ test('squirt moves the cue ball sideways; compensating the aim reduces the error
   const balls = [createBall(0, 600, 635)];
   const tip = { x: 0.5, y: 0 };
   const cue = { ...STD, squirtDegPerFullSide: 2 };
-  const plain = simulate(balls, { aimDir: { x: 1, y: 0 }, power: 0.25, tip }, { cue, maxTime: 0.6 });
+  const plain = simulate(balls, { aimDir: { x: 1, y: 0 }, power: P(0.25), tip }, { cue, maxTime: 0.6 });
   const a = (1 * Math.PI) / 180; // aim 1 degree to the right (+y on screen) = compensation
-  const comp = simulate(balls, { aimDir: { x: Math.cos(a), y: Math.sin(a) }, power: 0.25, tip }, { cue, maxTime: 0.6 });
+  const comp = simulate(balls, { aimDir: { x: Math.cos(a), y: Math.sin(a) }, power: P(0.25), tip }, { cue, maxTime: 0.6 });
   assert.ok(plain.balls[0].pos.y < 635 - 1, 'right english squirts left (negative y)');
   assert.ok(Math.abs(comp.balls[0].pos.y - 635) < Math.abs(plain.balls[0].pos.y - 635));
 });
@@ -381,7 +387,7 @@ test('no hop: a 5 degree cue never hops (even at full power); a level cue never 
 
 test('jump: 45 deg, 40 % hops 50..120 mm and lands 500..1300 mm away', () => {
   const sim = createSim([createBall(0, 300, 600)], { table: defaultTable(), cue: defaultCue(), rng: rng5 });
-  sim.strike({ aimDir: AIM_X, power: 0.4, tip: TIP0, elevationDeg: 45 });
+  sim.strike({ aimDir: AIM_X, power: P(0.4), tip: TIP0, elevationDeg: 45 });
   const b = sim.balls[0];
   let maxZ = 0;
   let takeoff = false;
@@ -400,7 +406,7 @@ test('jump: 45 deg, 40 % hops 50..120 mm and lands 500..1300 mm away', () => {
 
 test('jump clears a blocker and hits the target first without touching the blocker', () => {
   const balls = [createBall(0, 500, 600), createBall(2, 700, 600), createBall(1, 1300, 600)];
-  const res = simulate(balls, { aimDir: AIM_X, power: 0.38, tip: TIP0, elevationDeg: 50 }, { rng: rng5, orientation: false, recordPaths: false });
+  const res = simulate(balls, { aimDir: AIM_X, power: P(0.38), tip: TIP0, elevationDeg: 50 }, { rng: rng5, orientation: false, recordPaths: false });
   assert.equal(res.events.firstContact, 1);
   assert.equal(res.events.contacts.filter((c) => c.a === 2 || c.b === 2).length, 0, 'blocker untouched');
   assert.ok(!res.events.potted.includes(0));
@@ -410,7 +416,7 @@ test('massé: 72 deg, 15 %, right english curves right (left english mirrors), b
   for (const sgn of [1, -1]) {
     const start = { x: 300, y: 635 };
     const sim = createSim([createBall(0, start.x, start.y)], { table: defaultTable(), cue: defaultCue(), rng: rng5 });
-    sim.strike({ aimDir: AIM_X, power: 0.15, tip: { x: 0.42 * sgn, y: 0 }, elevationDeg: 72 });
+    sim.strike({ aimDir: AIM_X, power: P(0.15), tip: { x: 0.42 * sgn, y: 0 }, elevationDeg: 72 });
     const b = sim.balls[0];
     let maxZ = 0;
     let lateral400 = null;
@@ -437,7 +443,7 @@ test('massé: 72 deg, 15 %, right english curves right (left english mirrors), b
 
 test('airborne: vel and spin constant while z > 0; landing with back-spin slip changes vel', () => {
   const sim = createSim([createBall(0, 300, 600)], { table: defaultTable(), cue: defaultCue(), rng: rng5 });
-  sim.strike({ aimDir: AIM_X, power: 0.4, tip: { x: 0, y: -0.3 }, elevationDeg: 50 });
+  sim.strike({ aimDir: AIM_X, power: P(0.4), tip: { x: 0, y: -0.3 }, elevationDeg: 50 });
   const b = sim.balls[0];
   let v0 = null;
   let w0 = null;

@@ -21,7 +21,12 @@ export const MU_BALL_A = 0.01;
 export const MU_BALL_B = 0.108;
 export const MU_BALL_C = 1.088;
 export const SPIN_NORMAL_KEEP = -0.5; // cushion: normal spin component multiplier
-export const SIDE_KEEP = 0.5; // cushion: english kept after a bounce
+// Cushion nose contact point: rail nose at 36 mm above the cloth => (36 - R)/R above the ball centre.
+export const CUSHION_CONTACT_SIN = (36 - R) / R;
+export const CUSHION_CONTACT_COS = Math.sqrt(1 - CUSHION_CONTACT_SIN * CUSHION_CONTACT_SIN);
+// English decay on the cloth: constant spin-friction deceleration (rad/s^2) on top of the profile's exponential term.
+// [Unverified] order of magnitude of published "spinning friction" models (~10 rad/s^2).
+export const SIDE_SPIN_DECEL = 10;
 export const DT = 1 / 600;
 export const STOP_SPEED = 5;
 export const CUE_ID = 0;
@@ -421,6 +426,8 @@ export class Sim {
     b.pos.x += v.x * dt;
     b.pos.y += v.y * dt;
     w.z *= this.sideDecay;
+    const lin = SIDE_SPIN_DECEL * dt;
+    w.z = w.z > lin ? w.z - lin : w.z < -lin ? w.z + lin : 0;
     if (this.orient) integrateQuat(b.q, w, dt);
   }
 
@@ -740,7 +747,7 @@ export class Sim {
       const outX = -dx / d;
       const outY = -dy / d;
       const vn = v.x * outX + v.y * outY;
-      if (vn > 0) this._bounceNormal(b, outX, outY, vn, this.eJaw, 'jaw', 0.5);
+      if (vn > 0) this._bounceNormal(b, outX, outY, vn, this.eJaw, 'jaw', 0.8);
       p.x = qx - outX * (R + 1e-6);
       p.y = qy - outY * (R + 1e-6);
     }
@@ -754,9 +761,28 @@ export class Sim {
     }
   }
 
-  _bounceNormal(b, nx, ny, vn, e, wall, kickCapRatio = 0.6) {
+  /**
+   * Cushion / jaw impact. n = horizontal unit normal pointing into the cushion, vn = v.n > 0.
+   * 1) normal: v_n -> -e v_n; the roll component toward the cushion is reversed and damped (SPIN_NORMAL_KEEP).
+   * 2) friction at the cushion nose contact point r = R(cos(phi) n + sin(phi) up): Coulomb impulse
+   *    Jt = min(mu * (1+e) vn, |u_t| / 3.5) against the pre-impact contact slip u_t (component of v + w x r
+   *    perpendicular to r). Its horizontal part changes v, the vertical part goes into the table; dw = (r x J) / I.
+   *    This makes english bend the rebound (bounded by mu), the cushion bleed english and speed along the rail.
+   */
+  _bounceNormal(b, nx, ny, vn, e, wall, muScale = 1) {
     const v = b.vel;
     const wv = b.w;
+    // pre-impact contact slip at the cushion nose (z down => "up" is -z)
+    const C = CUSHION_CONTACT_COS;
+    const S = CUSHION_CONTACT_SIN;
+    const rx = R * C * nx;
+    const ry = R * C * ny;
+    const rz = -R * S;
+    // slip along the rail only (t = horizontal tangent); top/back spin into the rail is handled by SPIN_NORMAL_KEEP
+    const tx = -ny;
+    const ty = nx;
+    const ut = (v.x + (wv.y * rz - wv.z * ry)) * tx + (v.y + (wv.z * rx - wv.x * rz)) * ty;
+
     v.x -= (1 + e) * vn * nx;
     v.y -= (1 + e) * vn * ny;
     // roll vector (velocity units): normal component reversed and damped
@@ -768,19 +794,27 @@ export class Sim {
     const nsy = sy - k * sn * ny;
     wv.y = -nsx / R;
     wv.x = nsy / R;
-    // english kicks the ball along the tangent (capped by the normal speed); side = -R*wz
-    let kick = this.sideKick * (-R * wv.z);
-    const cap = kickCapRatio * vn;
-    kick = clamp(kick, -cap, cap);
-    v.x += kick * -ny;
-    v.y += kick * nx;
-    wv.z *= SIDE_KEEP;
+
+    const slip = Math.abs(ut);
+    const mu = this.sideKick * muScale;
+    if (slip > 1e-9 && mu > 0) {
+      // r is perpendicular to t, so the effective tangential compliance is 1 + R^2/I = 3.5 (per unit mass)
+      const jt = (Math.min(mu * (1 + e) * vn, slip / 3.5) * -ut) / slip;
+      const fx = jt * tx;
+      const fy = jt * ty;
+      v.x += fx;
+      v.y += fy;
+      const kk = 2.5 / (R * R);
+      wv.x += kk * (-rz * fy);
+      wv.y += kk * (rz * fx);
+      wv.z += kk * (rx * fy - ry * fx);
+    }
     const ch = this.events.cushionHits;
     if (ch.length < 200) ch.push({ id: b.id, time: this.time, wall, speed: vn });
   }
 
   _reflect(b, w, vn) {
-    this._bounceNormal(b, w.n.x, w.n.y, vn, this.eCushion, w.name, 0.6);
+    this._bounceNormal(b, w.n.x, w.n.y, vn, this.eCushion, w.name, 1);
     this._fixDepth(b, w);
   }
 }

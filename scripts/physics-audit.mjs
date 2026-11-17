@@ -5,8 +5,10 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { R, buildTable } from '../src/core/table.js';
-import { Sim, createBall, computeLaunch, strike, G, E_BALL } from '../src/core/physics.js';
-import { defaultTable, defaultCue, cuePreset, tablePreset } from '../src/core/equipment.js';
+import { Sim, createBall, computeLaunch, strike, G, E_BALL, CUSHION_CONTACT_SIN } from '../src/core/physics.js';
+import { defaultTable, defaultCue, cuePreset, tablePreset, powerForStick } from '../src/core/equipment.js';
+// Shots were designed on the old linear 500..9000 mm/s power scale; P(old) keeps the same stick speed.
+const P = (old) => powerForStick(500 + 8500 * old);
 import { rad, deg } from '../src/core/vec.js';
 
 const OK = 'ĐẠT';
@@ -32,7 +34,7 @@ const add = (id, effect, expected, measured, status, note = '') => rows.push({ i
 const byErr = (err, tol) => (err <= tol ? OK : err <= 2 * tol ? PART : FAIL);
 
 const newSim = (balls, cue = CUE, table = TABLE) => new Sim(balls, { table, cue, rng: noMis, orientation: false });
-const shotAt = (sim, o) => sim.strike({ aimDir: { x: 1, y: 0 }, power: 0.1, tip: { x: 0, y: 0 }, elevationDeg: 0, ...o });
+const shotAt = (sim, o) => sim.strike({ aimDir: { x: 1, y: 0 }, power: P(0.1), tip: { x: 0, y: 0 }, elevationDeg: 0, ...o });
 
 /** Step until the cue ball touches a ball; returns pre-contact state of cue and the others (null if none). */
 function toContact(sim, maxT = 8) {
@@ -70,7 +72,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 /* ------------------------------------------------------------------ A. motion on the cloth */
 {
   const sim = newSim([createBall(0, 150, 635)]);
-  const L = shotAt(sim, { power: 0.1 });
+  const L = shotAt(sim, { power: P(0.1) });
   let slid = false;
   let onset = null;
   while (sim.time < 5) {
@@ -101,7 +103,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 {
   const roll = (tipY) => {
     const sim = newSim([createBall(0, 150, 635)]);
-    const L = shotAt(sim, { power: 0.1, tip: { x: 0, y: tipY } });
+    const L = shotAt(sim, { power: P(0.1), tip: { x: 0, y: tipY } });
     let slid = false;
     while (sim.time < 5) {
       sim.substep();
@@ -117,7 +119,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 }
 {
   const sim = newSim([createBall(0, 200, 635)], NOSQ);
-  const L = shotAt(sim, { power: 0.12, tip: { x: 0.5, y: 0 } });
+  const L = shotAt(sim, { power: P(0.12), tip: { x: 0.5, y: 0 } });
   const wz0 = sim.balls[0].w.z;
   let dev = null;
   let wz1 = null;
@@ -134,7 +136,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 /* ------------------------------------------------------------------ B. ball-ball collisions */
 {
   const sim = newSim([createBall(0, 1200 - 2 * R - 8, 635), createBall(1, 1200, 635)]);
-  const L = shotAt(sim, { power: 0.14 });
+  const L = shotAt(sim, { power: P(0.14) });
   const pre = toContact(sim);
   sim.substep();
   const r = hv(byId(sim, 0).vel) / hv(pre[0].vel);
@@ -142,7 +144,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 }
 {
   const sim = newSim([createBall(0, 1200 - 2 * R - 8, 635), createBall(1, 1200, 635)]);
-  shotAt(sim, { power: 0.14 });
+  shotAt(sim, { power: P(0.14) });
   const pre = toContact(sim);
   const vc = hv(pre[0].vel);
   const vo = hv(byId(sim, 1).vel);
@@ -168,7 +170,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
   for (const frac of [0.25, 0.5, 0.75]) {
     const cut = deg(Math.asin(1 - frac));
     const sim = newSim(cutLayout(cut, 1, 900), FULL);
-    shotAt(sim, { power: 0.08, tip: { x: 0, y: 0.4 } });
+    shotAt(sim, { power: P(0.08), tip: { x: 0, y: 0.4 } });
     toContact(sim);
     let slid = false;
     while (sim.time < 6) {
@@ -183,7 +185,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 }
 {
   const sim = newSim([createBall(0, 1000 - 2 * R - 900, 635), createBall(1, 1000, 635)], FULL);
-  shotAt(sim, { power: 0.08, tip: { x: 0, y: 0.4 } });
+  shotAt(sim, { power: P(0.08), tip: { x: 0, y: 0.4 } });
   const pre = toContact(sim);
   const vpre = hv(pre[0].vel);
   let slid = false;
@@ -198,7 +200,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 }
 {
   const sim = newSim([createBall(0, 1000 - 2 * R - 150, 635), createBall(1, 1000, 635)], FULL);
-  shotAt(sim, { power: 0.15, tip: { x: 0, y: -0.4 } });
+  shotAt(sim, { power: P(0.15), tip: { x: 0, y: -0.4 } });
   const pre = toContact(sim);
   const sPre = -R * pre[0].w.y; // roll vector before impact (negative = backspin)
   let slid = false;
@@ -214,7 +216,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 }
 {
   const sim = newSim(cutLayout(30, 1, 900), FULL);
-  shotAt(sim, { power: 0.08, tip: { x: 0, y: 0.4 } });
+  shotAt(sim, { power: P(0.08), tip: { x: 0, y: 0.4 } });
   toContact(sim);
   const headings = [];
   let last = { ...byId(sim, 0).pos };
@@ -232,7 +234,7 @@ function cutThrow(cutDeg, sign, cue, power, tipY, gap = 400) {
 }
 {
   const sim = newSim(cutLayout(0, 1, 400));
-  shotAt(sim, { power: 0.14 });
+  shotAt(sim, { power: P(0.14) });
   toContact(sim);
   const vo = hv(byId(sim, 1).vel);
   let slid = false;
@@ -249,7 +251,7 @@ add('B9', 'Throw do cắt (CIT)', 'lệch về phía hướng bi cái đi, 0,5�
 {
   const run = (tipX) => {
     const sim = newSim([createBall(0, 400, 635), createBall(1, 1000, 635)], NOSQ);
-    shotAt(sim, { power: 0.2, tip: { x: tipX, y: 0 } });
+    shotAt(sim, { power: P(0.2), tip: { x: tipX, y: 0 } });
     toContact(sim);
     return ang(byId(sim, 1).vel); // + = right of the aim direction (+y)
   };
@@ -259,7 +261,7 @@ add('B9', 'Throw do cắt (CIT)', 'lệch về phía hướng bi cái đi, 0,5�
 }
 {
   // contact speed ~1 m/s vs ~5 m/s (stick speed chosen so the ball speed after the tip hit is about that), 30 deg stun cut
-  const powerFor = (vBall) => (vBall / ((1 + CUE.tipRestitution) * CUE.massG / (CUE.massG + 170)) - 500) / 8500;
+  const powerFor = (vBall) => powerForStick(vBall / ((1 + CUE.tipRestitution) * CUE.massG / (CUE.massG + 170)));
   const slow = cutThrow(30, 1, CUE, powerFor(1000), 0, 25);
   const fast = cutThrow(30, 1, CUE, powerFor(5000), 0, 25);
   const ts = Math.abs(slow.throwDeg);
@@ -279,7 +281,7 @@ add('B9', 'Throw do cắt (CIT)', 'lệch về phía hướng bi cái đi, 0,5�
 }
 {
   const sim = newSim([createBall(0, 400, 635), createBall(1, 1000, 635)], NOSQ);
-  shotAt(sim, { power: 0.2, tip: { x: -0.5, y: 0 } });
+  shotAt(sim, { power: P(0.2), tip: { x: -0.5, y: 0 } });
   const pre = toContact(sim);
   const wzCue = pre[0].w.z;
   const wzObj = byId(sim, 1).w.z;
@@ -288,7 +290,7 @@ add('B9', 'Throw do cắt (CIT)', 'lệch về phía hướng bi cái đi, 0,5�
 {
   const gap = 0.5;
   const sim = newSim([createBall(0, 300, 635), createBall(1, 800, 635), createBall(2, 800 + 2 * R + gap, 635), createBall(3, 800 + 4 * R + 2 * gap, 635)]);
-  shotAt(sim, { power: 0.2 });
+  shotAt(sim, { power: P(0.2) });
   let minD = Infinity;
   let pFirst = null;
   let pAfter = null;
@@ -305,7 +307,7 @@ add('B9', 'Throw do cắt (CIT)', 'lệch về phía hướng bi cái đi, 0,5�
 {
   const defl = (cue) => {
     const sim = newSim([createBall(0, 300, 635)], cue);
-    shotAt(sim, { power: 0.15, tip: { x: 0.5, y: 0 } });
+    shotAt(sim, { power: P(0.15), tip: { x: 0.5, y: 0 } });
     for (let i = 0; i < 300; i++) sim.substep();
     const b = sim.balls[0];
     return deg(Math.atan2(b.pos.y - 635, b.pos.x - 300));
@@ -318,7 +320,7 @@ add('B9', 'Throw do cắt (CIT)', 'lệch về phía hướng bi cái đi, 0,5�
 {
   const dev = (th) => {
     const sim = newSim([createBall(0, 300, 635)], STD_CUE());
-    const L = shotAt(sim, { power: 0.15, tip: { x: 0.5, y: 0 }, elevationDeg: th });
+    const L = shotAt(sim, { power: P(0.15), tip: { x: 0.5, y: 0 }, elevationDeg: th });
     let d = 0;
     while (sim.isMoving() && sim.balls[0].pos.x < GEO.W - 150) {
       sim.step(1 / 60);
@@ -352,7 +354,7 @@ function STD_CUE() {
   const out = [];
   for (const th of [0, 5, 15]) {
     const sim = newSim([createBall(0, 500, 635)], CUE);
-    const L = shotAt(sim, { power: 0.3, tip: { x: 0, y: -0.55 }, elevationDeg: th });
+    const L = shotAt(sim, { power: P(0.3), tip: { x: 0, y: -0.55 }, elevationDeg: th });
     const b = sim.balls[0];
     out.push(R * Math.hypot(b.w.x, b.w.y, b.w.z) / (2.5 * L.speed * 0.55));
   }
@@ -384,14 +386,17 @@ function firstCushion(setup) {
   const s = 400 / Math.SQRT2;
   const r = firstCushion({ x: 1200, y: 200, vel: { x: s, y: -s } });
   const out = deg(Math.atan2(Math.abs(r.post.vel.y), Math.abs(r.post.vel.x))); // angle off the rail
-  const expOut = deg(Math.atan(EC * Math.tan(rad(45))));
-  add('D2', 'Góc phản xạ không xoáy, có tính e băng (45°, bi lăn)', `tan(góc ra) = e_băng·tan(góc vào) → ${f(expOut, 2)}° với e_băng=${EC} (±3°)`, `góc ra so với băng=${f(out, 2)}° (vào 45°) ngay sau chạm; sai=${f(out - expOut, 2)}°`, byErr(Math.abs(out - expOut), 3));
+  // cushion friction at the nose contact (sin = CUSHION_CONTACT_SIN): rolling ball slip along the rail = (1+sin)·vt
+  const MU_C = TABLE.cushionSpinTransfer;
+  const vt1 = s - Math.min(MU_C * (1 + EC) * s, ((1 + CUSHION_CONTACT_SIN) * s) / 3.5);
+  const expOut = deg(Math.atan2(EC * s, vt1));
+  add('D2', 'Góc phản xạ không xoáy, có tính e + ma sát băng (45°, bi lăn)', `v_n' = e·v_n; v_t' = v_t − min(μ_băng·(1+e)·v_n, (1+sinφ)·v_t/3,5) → ${f(expOut, 2)}° với e=${EC}, μ_băng=${MU_C} (±3°)`, `góc ra so với băng=${f(out, 2)}° (vào 45°) ngay sau chạm; sai=${f(out - expOut, 2)}°`, byErr(Math.abs(out - expOut), 3));
 }
 {
   const out = (side) => {
     const s = 400 / Math.SQRT2;
     const w = { x: -s / R, y: -s / R, z: -side / R }; // roll about both axes + english (side = -R*wz)
-    const r = firstCushion({ x: 1200, y: 200, vel: { x: s, y: -s }, w, cue: NOSQ });
+    const r = firstCushion({ x: 600, y: 90, vel: { x: s, y: -s }, w, cue: NOSQ }); // start near the rail (away from the side pocket) so the english is still there
     return { vx: r.post.vel.x, vy: Math.abs(r.post.vel.y) };
   };
   const run = out(300); // right english, moving +x along the top rail = running english
@@ -405,7 +410,7 @@ function firstCushion(setup) {
   // follow: angle shrinks (curves towards the cushion); draw: angle grows (curves away).
   const bounce = (tipY) => {
     const sim = newSim([createBall(0, 800, 700)], FULL);
-    sim.strike({ aimDir: { x: 0.7071, y: -0.7071 }, power: 0.18, tip: { x: 0, y: tipY }, elevationDeg: 0 });
+    sim.strike({ aimDir: { x: 0.7071, y: -0.7071 }, power: P(0.18), tip: { x: 0, y: tipY }, elevationDeg: 0 });
     while (sim.time < 5 && !sim.events.cushionHits.length) sim.substep();
     const t0 = sim.time;
     const at = (dt) => {
@@ -429,7 +434,7 @@ function firstCushion(setup) {
     const x0 = y0 === null ? 700 + off * s : 700;
     const yy = y0 === null ? 700 - off * s : y0;
     const sim = newSim([createBall(0, x0, yy)]);
-    sim.strike({ aimDir: dir, power: 0.25, tip: { x: 0, y: 0 }, elevationDeg: 0 });
+    sim.strike({ aimDir: dir, power: P(0.25), tip: { x: 0, y: 0 }, elevationDeg: 0 });
     sim.run(8);
     return sim.balls[0].potted;
   };
@@ -447,7 +452,7 @@ function firstCushion(setup) {
     const start = { x: pk.x + 600 * Math.sin(t), y: pk.y + 600 * Math.cos(t) };
     const dir = { x: -Math.sin(t), y: -Math.cos(t) };
     const sim = newSim([createBall(0, start.x, start.y)]);
-    sim.strike({ aimDir: dir, power: 0.25, tip: { x: 0, y: 0 }, elevationDeg: 0 });
+    sim.strike({ aimDir: dir, power: P(0.25), tip: { x: 0, y: 0 }, elevationDeg: 0 });
     sim.run(8);
     return sim.balls[0].potted;
   };
@@ -458,7 +463,7 @@ function firstCushion(setup) {
 {
   const t = rad(55);
   const sideSim = newSim([createBall(0, GEO.W / 2 + 300 * Math.sin(t) + 25, 300 * Math.cos(t))]);
-  sideSim.strike({ aimDir: { x: -Math.sin(t), y: -Math.cos(t) }, power: 0.45, tip: { x: 0, y: 0 }, elevationDeg: 0 });
+  sideSim.strike({ aimDir: { x: -Math.sin(t), y: -Math.cos(t) }, power: P(0.45), tip: { x: 0, y: 0 }, elevationDeg: 0 });
   sideSim.run(8);
   const jaws = sideSim.events.cushionHits.filter((c) => c.wall === 'jaw').length;
   add('D7', 'Lắc miệng lỗ (pocket jaw rattle)', 'đánh lệch vào má lỗ bị nảy qua lại ≥ 2 lần và bật ra', `số lần đập má lỗ=${jaws}; vào lỗ=${sideSim.balls[0].potted ? 'có' : 'không'}`, !sideSim.balls[0].potted && jaws >= 2 ? OK : FAIL);

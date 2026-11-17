@@ -9,7 +9,7 @@ export const SIZES = {
 };
 
 export const BALL_MASS_G = 170;
-export const STICK_MIN = 500; // mm/s at power 0
+export const STICK_MIN = 300; // mm/s at power 0
 export const STICK_MAX = 9000; // mm/s at power 1
 export const DEFAULT_TABLE_ID = 'club-9ft';
 export const DEFAULT_CUE_ID = 'standard';
@@ -28,7 +28,7 @@ export const TABLE_PRESETS = [
     muRoll: 0.015,
     sideSpinDecay: 0.25,
     cushionRestitution: 0.82,
-    cushionSpinTransfer: 0.3,
+    cushionSpinTransfer: 0.22,
     cornerMouth: 114,
     sideMouth: 127,
     pocketCaptureScale: 0.85,
@@ -46,7 +46,7 @@ export const TABLE_PRESETS = [
     muRoll: 0.02,
     sideSpinDecay: 0.3,
     cushionRestitution: 0.75,
-    cushionSpinTransfer: 0.3,
+    cushionSpinTransfer: 0.25,
     cornerMouth: 127,
     sideMouth: 140,
     pocketCaptureScale: 0.85,
@@ -64,7 +64,7 @@ export const TABLE_PRESETS = [
     muRoll: 0.028,
     sideSpinDecay: 0.4,
     cushionRestitution: 0.7,
-    cushionSpinTransfer: 0.3,
+    cushionSpinTransfer: 0.28,
     cornerMouth: 140,
     sideMouth: 155,
     pocketCaptureScale: 0.85,
@@ -82,7 +82,7 @@ export const TABLE_PRESETS = [
     muRoll: 0.02,
     sideSpinDecay: 0.3,
     cushionRestitution: 0.75,
-    cushionSpinTransfer: 0.3,
+    cushionSpinTransfer: 0.25,
     cornerMouth: 127,
     sideMouth: 140,
     pocketCaptureScale: 0.85,
@@ -176,7 +176,7 @@ export const TABLE_FIELDS = [
   { key: 'muRoll', label: 'Ma sát lăn', min: 0.004, max: 0.03, step: 0.001, digits: 3 },
   { key: 'sideSpinDecay', label: 'Tắt effet (1/s)', min: 0.05, max: 1, step: 0.05, digits: 2 },
   { key: 'cushionRestitution', label: 'Độ nảy băng', min: 0.6, max: 0.9, step: 0.01, digits: 2 },
-  { key: 'cushionSpinTransfer', label: 'Effet đổi góc nảy', min: 0, max: 0.6, step: 0.05, digits: 2 },
+  { key: 'cushionSpinTransfer', label: 'Ma sát băng (effet đổi góc, ăn tốc độ dọc băng)', min: 0, max: 0.4, step: 0.01, digits: 2 },
   { key: 'cornerMouth', label: 'Miệng lỗ góc (mm)', min: 100, max: 160, step: 1, digits: 0 },
   { key: 'sideMouth', label: 'Miệng lỗ giữa (mm)', min: 110, max: 180, step: 1, digits: 0 },
   { key: 'pocketCaptureScale', label: 'Hệ số hút lỗ', min: 0.6, max: 1, step: 0.05, digits: 2 },
@@ -344,8 +344,13 @@ export function cueVisualStyle(cue) {
   };
 }
 
-/** Cue stick speed (mm/s) for a power slider value 0..1. */
-export const stickSpeed = (power) => STICK_MIN + clamp(power, 0, 1) * (STICK_MAX - STICK_MIN);
+/**
+ * Cue stick speed (mm/s) for a power slider value 0..1.
+ * Non-linear (power^POWER_CURVE) so most of the slider covers ordinary shot speeds (~0.5-4 m/s ball speed)
+ * and only the top end reaches break speed. [Unverified] typical speeds: soft <1, medium 1.5-3, firm 4-6, break 8-12 m/s.
+ */
+export const POWER_CURVE = 1.7;
+export const stickSpeed = (power) => STICK_MIN + Math.pow(clamp(power, 0, 1), POWER_CURVE) * (STICK_MAX - STICK_MIN);
 
 /** Cue-ball speed after the tip hit: v = (1 + e_tip) * m_cue / (m_cue + m_ball) * v_stick. */
 export function ballSpeed(cue, vStick) {
@@ -354,3 +359,6 @@ export function ballSpeed(cue, vStick) {
 
 /** Signed squirt rotation (deg) applied to the launch direction for a tip offset x. Right english -> negative. */
 export const squirtDeg = (cue, tipX) => -cue.squirtDegPerFullSide * clamp(tipX, -1, 1);
+
+/** Inverse of stickSpeed: power slider value (0..1) that gives stick speed `v` (mm/s). */
+export const powerForStick = (v) => Math.pow(clamp((v - STICK_MIN) / (STICK_MAX - STICK_MIN), 0, 1), 1 / POWER_CURVE);

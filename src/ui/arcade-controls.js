@@ -273,10 +273,29 @@ export function createArcadeControls({ onPower, onShoot, onNudge, onTip, onOpenS
     ctx.stroke();
   }
 
+  // Cue elevation mirror of the panel slider (#elevation, which owns the app wiring)
+  const mainElev = $('elevation');
+  const popElev = $('popElevation');
+  const popElevVal = $('popElevationVal');
+  function syncPopElevation() {
+    if (!mainElev || !popElev) return;
+    popElev.value = mainElev.value;
+    popElev.disabled = mainElev.disabled;
+    if (popElevVal) popElevVal.textContent = `${Math.round(Number(mainElev.value))}°`;
+  }
+  popElev?.addEventListener('input', () => {
+    if (!mainElev) return;
+    mainElev.value = popElev.value;
+    mainElev.dispatchEvent(new Event('input', { bubbles: true }));
+    syncPopElevation();
+  });
+  mainElev?.addEventListener('input', syncPopElevation);
+
   function toggleSpinPopover(open) {
     if (!spinPopover) return;
     const shouldOpen = open !== undefined ? open : spinPopover.hidden;
     spinPopover.hidden = !shouldOpen;
+    if (shouldOpen) syncPopElevation();
     if (shouldOpen && popoverSpinPad) {
       popoverSpinPad.resize();
       popoverSpinPad.draw();

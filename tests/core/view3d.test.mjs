@@ -113,7 +113,15 @@ test('fovForAspect and topDownPose fit the table + rails and align the long axis
 });
 
 test('camera director: eye -> hold -> top-down -> hold -> eye, scratch hold, input snaps', () => {
-  const d = createCameraDirector();
+  // state-machine timings checked with explicit short durations; the defaults are slower (see the next assertion)
+  const FAST = { hold1: 250, toTop: 600, hold2: 300, scratchHold: 1200, toEye: 600 };
+  const slow = createCameraDirector();
+  slow.update({ shooting: true }, 0);
+  assert.equal(slow.update({ shooting: true }, 600).blend, 0, 'default hold keeps the player view >= 600 ms');
+  slow.update({ shooting: true }, 700);
+  const mid = slow.update({ shooting: true }, 1300).blend;
+  assert.ok(mid > 0 && mid < 0.6, `default move to top-down takes > 1 s (blend ${mid})`);
+  const d = createCameraDirector(FAST);
   let r = d.update({ shooting: false }, 0);
   assert.equal(r.state, 'eye'); assert.equal(r.blend, 0);
   r = d.update({ shooting: true }, 1000);
@@ -153,7 +161,7 @@ test('camera director: eye -> hold -> top-down -> hold -> eye, scratch hold, inp
   assert.equal(r.state, 'toEye');
 
   // user input snaps: during toTop -> top, during toEye -> eye
-  const e = createCameraDirector();
+  const e = createCameraDirector(FAST);
   e.update({ shooting: true }, 0);
   e.update({ shooting: true }, 300);
   r = e.update({ shooting: true, userInput: true }, 400);

@@ -14,7 +14,7 @@ import {
 } from './view3d-math.js';
 import { dropVisual } from './drop-anim.js';
 
-const TRANSITION_MS = 600;
+const TRANSITION_MS = 1000; // camera glide back to the cue ball after a shot (slow enough not to cause motion sickness)
 const STICK_LEN = 1470;
 const IDENT_Q = { w: 1, x: 0, y: 0, z: 0 };
 const SLIDE_RGB = [1, 0.596, 0];

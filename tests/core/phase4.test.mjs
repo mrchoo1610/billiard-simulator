@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { R } from '../../src/core/table.js';
 import { createBall, Sim, MU_BALL_A, MU_BALL_B, MU_BALL_C } from '../../src/core/physics.js';
-import { defaultTable, cuePreset, BALL_MASS_G, sanitizeTable } from '../../src/core/equipment.js';
+import { defaultTable, cuePreset, BALL_MASS_G, sanitizeTable, powerForStick } from '../../src/core/equipment.js';
 import { rad, deg } from '../../src/core/vec.js';
 
 const STD = cuePreset('standard');
@@ -10,7 +10,7 @@ const FULL = { ...STD, squirtDegPerFullSide: 0, spinEfficiency: 1 }; // tip heig
 const near = (a, b, eps) => assert.ok(Math.abs(a - b) < eps, `${a} !~ ${b} (eps ${eps})`);
 
 /** Power slider value whose cue-ball launch speed (mm/s) is `v` for cue `c`. */
-const powerFor = (v, c) => (v / (((1 + c.tipRestitution) * c.massG) / (c.massG + BALL_MASS_G)) - 500) / 8500;
+const powerFor = (v, c) => powerForStick(v / (((1 + c.tipRestitution) * c.massG) / (c.massG + BALL_MASS_G)));
 
 /** Cut shot (object ball goes to +y by `cutDeg`), gap mm between the cue ball and the contact point. Returns throw (deg, >0 = away from the aim line). */
 function throwOf({ cutDeg = 30, speed = 1000, tipY = 0, cue = FULL, table = defaultTable(), gap = 25 }) {

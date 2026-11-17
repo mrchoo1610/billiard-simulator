@@ -141,7 +141,7 @@ export function genPositionDrill(rng = Math.random, eq = {}) {
     if (s.cutAngleDeg > 35 || !inTable(geo, s.ghost)) continue;
     const balls = [createBall(0, cue.x, cue.y), createBall(1, obj.x, obj.y)];
     if (isPathBlocked(obj, pk.aim, balls, R, [1]) !== null) continue;
-    const power = 0.12 + rng() * 0.2;
+    const power = 0.32 + rng() * 0.2;
     const tipY = (rng() * 2 - 1) * maxTip;
     const r = simulate(
       balls,
@@ -161,7 +161,7 @@ export function genPositionDrill(rng = Math.random, eq = {}) {
   }
   const cue = { x: geo.W * 0.35, y: geo.H * 0.55 };
   const obj = { x: geo.W * 0.2, y: geo.H * 0.35 };
-  return { cue, obj, pocket: 0, zone: { x: geo.W * 0.27, y: geo.H * 0.47, r: 150 }, solution: { power: 0.2, tipY: 0 } };
+  return { cue, obj, pocket: 0, zone: { x: geo.W * 0.27, y: geo.H * 0.47, r: 150 }, solution: { power: 0.41, tipY: 0 } };
 }
 
 /**
@@ -197,7 +197,7 @@ export function genSquirtDrill(rng = Math.random, eq = {}) {
       const balls = [createBall(0, cue.x, cue.y), createBall(1, obj.x, obj.y)];
       if (isPathBlocked(obj, pk.aim, balls, R, [1]) !== null) continue;
       const tipX = (rng() < 0.5 ? -1 : 1) * (0.6 + 0.4 * rng()) * maxTip;
-      const power = 0.18 + rng() * 0.1;
+      const power = 0.36 + rng() * 0.16;
       const offsetDeg = cueProfile.squirtDegPerFullSide * tipX;
       const solved = run(balls, rotate(s.aimDir, rad(offsetDeg)), power, tipX);
       if (!solved.events.potted.includes(1) || solved.balls[0].potted || solved.events.firstContact !== 1) continue;
@@ -211,7 +211,7 @@ export function genSquirtDrill(rng = Math.random, eq = {}) {
   const cue = { x: geo.W * 0.4, y: geo.H * 0.55 };
   const obj = { x: geo.W * 0.22, y: geo.H * 0.35 };
   const tipX = 0.4;
-  return { cue, obj, pocket: 0, tipX, power: 0.2, offsetDeg: cueProfile.squirtDegPerFullSide * tipX, squirtDeg: cueProfile.squirtDegPerFullSide * tipX, cutAngleDeg: 0 };
+  return { cue, obj, pocket: 0, tipX, power: 0.41, offsetDeg: cueProfile.squirtDegPerFullSide * tipX, squirtDeg: cueProfile.squirtDegPerFullSide * tipX, cutAngleDeg: 0 };
 }
 
 /** Squirt drill is scored purely by potting the object ball without scratching. */

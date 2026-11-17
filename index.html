@@ -11,7 +11,7 @@
   <title>MimePool – Bida 9 bi &amp; 8 bi online</title>
   <link rel="manifest" href="assets/manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="assets/style.css?v=47">
+  <link rel="stylesheet" href="assets/style.css?v=48">
 </head>
 <body data-app="practice" data-mode="free">
   <header class="top">
@@ -168,6 +168,11 @@
           <canvas id="popoverSpinCanvas" class="popover-spin-canvas" width="160" height="160"></canvas>
           <div class="spin-popover-label" id="popoverSpinLabel">Tâm bi (Bi dừng)</div>
           <div class="spin-popover-hint">Chạm đúp để về tâm bi</div>
+          <label class="spin-popover-elev" for="popElevation" title="Độ nâng đuôi cơ: kết hợp effet làm bi cái cong (massé); dựng cơ từ khoảng 40° và đánh giữa bi để nhảy bi">
+            <span>Nâng cơ</span>
+            <input type="range" id="popElevation" min="0" max="72" step="1" value="5">
+            <output id="popElevationVal">5°</output>
+          </label>
         </div>
         <div class="spin-popover-foot">
           <button type="button" class="btn small" id="btnResetSpin">Về tâm bi</button>
@@ -324,8 +329,8 @@
               <div class="spin-label" id="spinLabel">Giữa (bi dừng)</div>
               <div class="hint">Chạm đúp để về giữa</div>
             </div>
-            <div class="sliders hide-bot">
-              <label class="aim" for="aimOffset">
+            <div class="sliders">
+              <label class="aim hide-bot" for="aimOffset">
                 <span>Lệch ngắm</span>
                 <input type="range" id="aimOffset" min="-5" max="5" step="0.1" value="0">
                 <output id="aimOffsetVal">0,0°</output>
@@ -335,7 +340,7 @@
                 <input type="range" id="elevation" min="0" max="72" step="1" value="5">
                 <output id="elevationVal">5°</output>
               </label>
-              <label class="comp" for="chkComp" title="Tự động bù squirt + cong + throw khi ngắm">
+              <label class="comp hide-bot" for="chkComp" title="Tự động bù squirt + cong + throw khi ngắm">
                 <input type="checkbox" id="chkComp" checked>
                 <span>Tự bù effet</span>
               </label>

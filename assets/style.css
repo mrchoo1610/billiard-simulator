@@ -461,15 +461,123 @@ body[data-mode="thickness"] .panel { display: block; max-height: 22vh; }
 .sheet-actions { display: grid; grid-template-columns: 1fr; gap: 8px; margin-top: 8px; }
 @media (min-width: 700px) { .sheet { align-items: center; } .sheet-box { border-radius: 18px; } }
 
-/* Landscape phones: side-by-side */
+/* Landscape phones: side-by-side & compact gaming layout */
 @media (orientation: landscape) and (max-height: 520px) {
-  .top { flex-wrap: nowrap; }
-  .tabs { flex: 1 1 0; min-width: 0; }
+  .top {
+    flex-wrap: nowrap;
+    padding: calc(3px + var(--safe-t)) calc(8px + var(--safe-r)) 3px calc(8px + var(--safe-l));
+    gap: 6px;
+    height: 36px;
+  }
+  .top-brand {
+    gap: 6px;
+  }
+  .top-brand h1 {
+    display: none;
+  }
+  .btn-lobby-pill,
+  .btn-top-settings {
+    height: 28px;
+    min-height: 28px;
+    font-size: 11px;
+    padding: 0 8px;
+  }
+  .main-modes {
+    flex: 0 1 auto;
+    height: 28px;
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .main-modes button {
+    height: 28px;
+    min-height: 28px;
+    font-size: 11px;
+    padding: 0 8px;
+  }
+  .tabs {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 28px;
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs button {
+    height: 26px;
+    min-height: 26px;
+    font-size: 10.5px;
+    padding: 0 7px;
+  }
   .equip-chip { max-width: 38%; margin-left: 0; }
   .sheet-box { max-height: 100vh; max-height: 100dvh; border-radius: 0; }
   .panel, body[data-mode="thickness"] .panel { display: block; max-height: none; overflow: visible; }
   .panel-toggle { display: none; }
-  .top h1 { display: none; }
+
+  /* Compact Match Scoreboard in Landscape */
+  .tv-scoreboard {
+    transform: translateX(-50%) scale(0.85);
+    transform-origin: top center;
+    top: calc(2px + var(--safe-t));
+  }
+
+  /* Compact Arcade HUD & Cue Puller in Landscape */
+  .cue-puller-wrap {
+    left: calc(6px + var(--safe-l));
+    width: 38px;
+    padding: 4px 2px;
+  }
+  .cue-puller-track {
+    width: 24px;
+    height: 130px;
+  }
+  .stage-hud-bottom {
+    bottom: calc(4px + var(--safe-b));
+    height: 36px;
+    gap: 6px;
+  }
+  .floating-spin-btn {
+    width: 34px;
+    height: 34px;
+  }
+  .floating-spin-btn canvas {
+    width: 28px;
+    height: 28px;
+  }
+  .btn-quick-shoot {
+    height: 36px;
+    min-height: 36px;
+    min-width: 66px;
+    font-size: 13px;
+    padding: 0 12px;
+  }
+  .aim-step-btn {
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    font-size: 14px;
+  }
+  .aim-wheel-dial {
+    width: 50px;
+    height: 28px;
+  }
+  .minimap {
+    bottom: calc(44px + var(--safe-b));
+    right: calc(6px + var(--safe-r));
+    width: clamp(80px, 18vw, 110px);
+  }
+  .potted-tray {
+    bottom: calc(44px + var(--safe-b));
+    left: calc(6px + var(--safe-l));
+  }
+  .spin-popover {
+    bottom: calc(44px + var(--safe-b));
+    left: 50%;
+    transform: translateX(-50%) scale(0.88);
+    transform-origin: bottom center;
+  }
 }
 
 /* Desktop */
@@ -1500,21 +1608,6 @@ body[data-app="bvb"] .kb-hudwrap {
 
 @media (max-width: 640px) {
   .shot-spec-hud { display: none !important; }
-  .tv-scoreboard {
-    min-width: 0;
-    max-width: calc(100% - 16px);
-    top: 6px;
-    left: 50%;
-    transform: translateX(-50%);
-  }
-  .main-modes { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
-  .main-modes::-webkit-scrollbar { display: none; }
-  .tv-pname { font-size: 11.5px; }
-  .tv-pscore { font-size: 16px; min-width: 18px; }
-  body[data-mode="bot"] .potted-tray {
-    bottom: 88px;
-    left: 8px;
-  }
 }
 
 /* -------------------------------------------------------------
@@ -2008,6 +2101,18 @@ body[data-app="pvp"] #mainModes button[data-app="pvp"].active { background: line
   color: var(--muted);
   text-align: center;
 }
+.spin-popover-elev {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 12px;
+}
+.spin-popover-elev span { color: var(--muted); white-space: nowrap; }
+.spin-popover-elev input { flex: 1 1 auto; min-width: 0; min-height: 28px; }
+.spin-popover-elev output { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; color: #e2e8f0; }
+.spin-popover-elev:has(input:disabled) { opacity: 0.45; }
 .spin-popover-foot {
   width: 100%;
   display: flex;
@@ -2016,50 +2121,421 @@ body[data-app="pvp"] #mainModes button[data-app="pvp"].active { background: line
   margin-top: 4px;
 }
 
-/* Mobile & Touch Responsiveness for Arcade Elements */
+/* =============================================================
+   Mobile Phone Responsiveness & Touch Ergonomics (Portrait <= 640px)
+   ============================================================= */
 @media (max-width: 640px) {
+  /* 1. Header Ergonomics on Mobile */
+  .top {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    padding: calc(6px + var(--safe-t)) calc(10px + var(--safe-r)) 6px calc(10px + var(--safe-l));
+    gap: 6px 8px;
+  }
+  .top-brand {
+    order: 1;
+    flex: 0 1 auto;
+    gap: 8px;
+  }
+  .top-brand h1 {
+    font-size: 15px;
+    letter-spacing: 0.01em;
+  }
+  .btn-lobby-pill {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+    gap: 4px;
+    border-radius: 999px;
+  }
+  .top-actions {
+    order: 2;
+    flex: 0 0 auto;
+    margin-left: auto;
+    gap: 6px;
+  }
+  .btn-top-settings {
+    height: 32px;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 999px;
+  }
+  .main-modes {
+    order: 3;
+    flex: 1 0 100%;
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    gap: 5px;
+    padding: 2px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+  .main-modes::-webkit-scrollbar {
+    display: none;
+  }
+  .main-modes button {
+    flex: 0 0 auto;
+    height: 32px;
+    min-height: 32px;
+    padding: 0 10px;
+    font-size: 12px;
+    border-radius: 8px;
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+  .tabs {
+    order: 4;
+    flex: 1 0 100%;
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    gap: 4px;
+    padding: 2px 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+  }
+  .tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs button {
+    flex: 0 0 auto;
+    height: 28px;
+    min-height: 28px;
+    padding: 0 9px;
+    font-size: 11.5px;
+    border-radius: 7px;
+    white-space: nowrap;
+    scroll-snap-align: start;
+  }
+
+  /* 2. TV Match Scoreboard on Mobile */
+  .tv-scoreboard {
+    top: calc(6px + var(--safe-t));
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 0;
+    max-width: calc(100% - 16px);
+    border-radius: 20px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.65), 0 0 10px rgba(0, 0, 0, 0.4);
+  }
+  .tv-main-bar {
+    padding: 2px 6px;
+    padding-right: 26px;
+  }
+  .tv-player {
+    gap: 5px;
+    padding: 2px 4px;
+    min-width: 0;
+  }
+  .tv-pname {
+    font-size: 11px;
+    max-width: 52px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tv-pscore {
+    font-size: 15px;
+    min-width: 18px;
+    padding: 1px 4px;
+  }
+  .tv-clock-wrap {
+    width: 24px;
+    height: 24px;
+  }
+  .shot-clock-svg {
+    width: 24px;
+    height: 24px;
+  }
+  .shot-clock-bg,
+  .shot-clock-bar {
+    cx: 12;
+    cy: 12;
+    r: 9;
+  }
+  .tv-avatar-icon {
+    font-size: 10px;
+  }
+  .tv-divider {
+    min-width: 68px;
+    padding: 2px 4px;
+    margin: 0 2px;
+  }
+  .tv-meta-row {
+    font-size: 7.5px;
+    gap: 3px;
+  }
+  .tv-target-badge,
+  .tv-shot-clock-sec {
+    font-size: 8.5px;
+  }
+  .tv-compact-btn {
+    width: 22px;
+    height: 22px;
+    font-size: 9px;
+    right: 3px;
+  }
+
+  /* 3. Arcade Cue Puller on Mobile */
   .cue-puller-wrap {
-    left: 8px;
+    left: calc(6px + var(--safe-l));
     width: 44px;
     padding: 6px 4px;
+    border-radius: 22px;
   }
   .cue-puller-track {
-    width: 30px;
-    height: 170px;
+    width: 28px;
+    height: 165px;
+    border-radius: 14px;
   }
+  .cue-puller-badge {
+    font-size: 10px;
+    padding: 1px 4px;
+  }
+  .cue-puller-hint {
+    font-size: 8px;
+    letter-spacing: 0.04em;
+  }
+
+  /* 4. Bottom Arcade HUD & Action Controls */
   .stage-hud-bottom {
-    bottom: 8px;
+    bottom: calc(8px + var(--safe-b));
+    left: 50%;
+    transform: translateX(-50%);
     width: calc(100% - 16px);
-    gap: 8px;
+    max-width: 440px;
+    gap: 6px;
+    justify-content: space-between;
   }
   .floating-spin-label {
     display: none;
   }
   .floating-spin-btn {
+    width: 44px;
+    height: 44px;
     padding: 3px;
+    flex-shrink: 0;
+    border-radius: 50%;
   }
   .floating-spin-btn canvas {
     width: 36px;
     height: 36px;
   }
+  .stage-center-actions {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+  }
   .btn-quick-shoot {
     min-width: 76px;
-    height: 42px;
+    height: 44px;
+    min-height: 44px;
     padding: 0 16px;
     font-size: 14px;
+    border-radius: 22px;
   }
   .btn-open-lab {
     height: 34px;
+    min-height: 34px;
     padding: 0 10px;
     font-size: 11px;
   }
-  .aim-wheel-dial {
-    width: 60px;
+  .aim-wheel-wrap {
+    gap: 3px;
+    flex-shrink: 0;
   }
   .aim-step-btn {
-    width: 30px;
-    height: 30px;
+    width: 34px;
+    height: 34px;
+    min-height: 34px;
     font-size: 16px;
+    border-radius: 50%;
+    position: relative;
+  }
+  .aim-step-btn::before {
+    content: '';
+    position: absolute;
+    inset: -6px;
+  }
+  .aim-wheel-dial {
+    width: 58px;
+    height: 34px;
+    border-radius: 17px;
+  }
+
+  /* 5. Non-overlapping Potted Tray & Minimap */
+  .potted-tray {
+    bottom: calc(64px + var(--safe-b));
+    left: calc(8px + var(--safe-l));
+    max-width: calc(100% - 130px);
+    padding: 4px 8px;
+    border-radius: 10px;
+    gap: 3px;
+  }
+  .potted-label {
+    font-size: 10px;
+    margin-right: 0;
+  }
+  .potted-tray .potted-ball,
+  .potted-tray.is-15 .potted-ball {
+    width: 17px;
+    height: 17px;
+  }
+  .potted-tray .potted-ball .p-num,
+  .potted-tray.is-15 .potted-ball .p-num {
+    width: 10px;
+    height: 10px;
+    font-size: 6.5px;
+    line-height: 10px;
+  }
+  .minimap {
+    bottom: calc(64px + var(--safe-b));
+    right: calc(8px + var(--safe-r));
+    width: clamp(90px, 25vw, 120px);
+    border-radius: 8px;
+  }
+
+  /* 6. Centered Spin Popover on Mobile */
+  .spin-popover {
+    left: 50%;
+    bottom: calc(66px + var(--safe-b));
+    transform: translateX(-50%);
+    width: min(250px, calc(100% - 24px));
+    padding: 10px 12px;
+    border-radius: 16px;
+    animation: popoverFadeInMobile 0.18s ease-out;
+  }
+  .popover-spin-canvas {
+    width: 140px;
+    height: 140px;
+  }
+  .spin-popover-title {
+    font-size: 11px;
+  }
+  .spin-popover-label {
+    font-size: 11.5px;
+  }
+
+  /* 7. Settings Modal Ergonomics on Mobile */
+  .game-settings-modal {
+    padding: calc(8px + var(--safe-t)) calc(8px + var(--safe-r)) calc(8px + var(--safe-b)) calc(8px + var(--safe-l));
+  }
+  .settings-dialog {
+    max-height: 94vh;
+    max-height: 94dvh;
+    border-radius: 16px;
+  }
+  .settings-head {
+    padding: 12px 14px;
+  }
+  .settings-head h2 {
+    font-size: 16px;
+  }
+  .settings-body {
+    padding: 12px 14px;
+    gap: 12px;
+  }
+  .settings-section {
+    padding-bottom: 10px;
+  }
+  .settings-sec-title {
+    font-size: 11.5px;
+    margin-bottom: 8px;
+  }
+  .settings-row {
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 6px;
+  }
+  .settings-row .seg-mini {
+    width: 100%;
+    justify-content: stretch;
+  }
+  .settings-row .seg-mini button {
+    flex: 1;
+    min-height: 38px;
+    font-size: 12px;
+    padding: 4px 6px;
+  }
+  .settings-row-label {
+    font-size: 12.5px;
+  }
+  .settings-shortcuts-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+  .shortcut-item {
+    font-size: 11px;
+  }
+
+  /* 8. Lobby Modal Ergonomics on Mobile */
+  .lobby {
+    padding: calc(6px + var(--safe-t)) calc(6px + var(--safe-r)) calc(6px + var(--safe-b)) calc(6px + var(--safe-l));
+  }
+  .lobby-dialog {
+    padding: 14px 12px;
+    border-radius: 16px;
+    max-height: 94vh;
+    max-height: 94dvh;
+    overflow-y: auto;
+  }
+  .lobby-header h2 {
+    font-size: 18px;
+  }
+  .lobby-header p {
+    font-size: 12px;
+  }
+  .lobby-cards {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+  .lobby-card {
+    padding: 14px 12px;
+    border-radius: 14px;
+  }
+  .lobby-icon {
+    font-size: 24px;
+    margin-bottom: 6px;
+  }
+  .lobby-card h3 {
+    font-size: 16px;
+  }
+  .lobby-card p {
+    font-size: 12.5px;
+    margin-bottom: 10px;
+  }
+  .lobby-game button,
+  .lobby-diff button {
+    min-height: 38px;
+    font-size: 12px;
+  }
+  .lobby-card .btn {
+    min-height: 42px;
+    font-size: 14px;
+  }
+}
+
+@keyframes popoverFadeInMobile {
+  from { opacity: 0; transform: translate(-50%, 10px) scale(0.96); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+@media (max-width: 480px) {
+  .side {
+    width: 100vw;
+    max-width: 100vw;
+  }
+  .side-drawer-head {
+    padding: calc(10px + var(--safe-t)) calc(14px + var(--safe-r)) 10px calc(14px + var(--safe-l));
   }
 }
 

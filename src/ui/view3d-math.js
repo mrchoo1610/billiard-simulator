@@ -138,7 +138,8 @@ export function topDownPose(tableW, tableH, fovDeg, aspect, { margin = 1.06, rai
  * scratch so the re-spotted cue ball is seen) -> toEye (600 ms) -> eye. Any user input snaps to the pending target.
  */
 export function createCameraDirector(cfg = {}) {
-  const c = { hold1: 250, toTop: 600, hold2: 300, scratchHold: 1200, toEye: 600, ...cfg };
+  // Slow, eased moves: fast eye <-> top-down swings made players dizzy. hold1 keeps the player view long enough to see the hit.
+  const c = { hold1: 700, toTop: 1300, hold2: 700, scratchHold: 1500, toEye: 1200, ...cfg };
   let state = 'eye';
   let t0 = 0;
   let p = 0;

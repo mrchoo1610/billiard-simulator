@@ -133,7 +133,8 @@ console.log('='.repeat(70));
     const c = res.balls[0].pos;
     const inside = res.balls[0].potted || (c.x >= R - 2 && c.x <= geo.W - R + 2 && c.y >= R - 2 && c.y <= geo.H - R + 2);
     if (!inside) insideAll = false;
-    if (res.events.cushionHits.length === 0) bounceAll = false;
+    // 45 deg from (W/4, H/2) runs straight into the side pocket centre: a pot is a valid outcome, not a missed bounce
+    if (res.events.cushionHits.length === 0 && !res.balls[0].potted) bounceAll = false;
   }
   recordTest(
     'PHY-03',
