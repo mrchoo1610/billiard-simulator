@@ -1777,6 +1777,24 @@ function startBotRack(breaker = state.bot.breaker) {
   if (breaker === 'bot' || state.bot.matchType === 'bvb') scheduleBotTurn();
 }
 
+/** First legal target ball for `who` in the current bot/PvP game (9-ball: lowest ball; 8-ball: first of the group). */
+function firstLegalFor(who) {
+  if (state.bot.game !== '8ball') return lowestObjectId();
+  const ids = eightBallTargetIds(state.balls, state.bot.groups[who]);
+  return ids.length ? ids[0] : null;
+}
+
+/** Set the target to `who`'s first legal ball and point the aim at it. */
+function aimAtTargetFor(who) {
+  const tid = firstLegalFor(who);
+  state.targetId = tid;
+  const cue = ball(0);
+  const tgt = tid ? ball(tid) : null;
+  if (cue && tgt) {
+    state.aimAngle = normAngle(Math.round(deg(Math.atan2(tgt.pos.y - cue.pos.y, tgt.pos.x - cue.pos.x)) * 100) / 100);
+  }
+}
+
 function handleShotTimeout(who) {
   if (state.mode !== 'bot' || state.phase !== 'aim' || state.bot.matchOver) return;
   const shooter = who || state.bot.turn;
