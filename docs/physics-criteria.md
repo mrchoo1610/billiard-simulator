@@ -49,7 +49,7 @@
 | ID | Hiệu ứng | Kỳ vọng | Cách test | Dung sai |
 |---|---|---|---|---|
 | D1 | Phục hồi băng | Vận tốc pháp tuyến sau băng ≈ 0.7–0.85 trước | Đánh vuông góc vào băng | trong khoảng |
-| D2 | Góc phản xạ không xoáy, có tính e băng | tan(góc ra) ≈ e_băng·tan(góc vào) (bi bật ra ngắn hơn) | 45°, bi lăn | ±3° |
+| D2 | Góc phản xạ không xoáy, có tính e băng | Theo mô hình băng Han (2005), tiếp xúc tại mũi băng (36 mm) với e_băng và μ_băng của profile; đối chiếu được với pooltool (`scripts/engine-compare`) | 45°, bi lăn | ±3° |
 | D3 | Má phê xuôi/ngược ở băng | Má xuôi (running) → góc ra mở rộng; má ngược → góc ra hẹp | So 3 trường hợp | đúng thứ tự |
 | D4 | Xoáy trên/dưới qua băng | Sau khi bật băng: bi theo cong về phía băng (góc với băng giảm dần); bi kéo cong ra xa băng (góc tăng dần) | Đo góc với băng tại 0.05 s và 0.35 s sau chạm | đúng chiều cả hai |
 | D5 | Lỗ: bi chạm mép lỗ (jaw) | Bi vào lỗ góc khi lệch nhỏ; đi sát băng vào lỗ được; bị bật ra khi lệch lớn | Lệch 0/20/50 mm | đúng |

@@ -1,0 +1,17 @@
+{
+  "_doc": "Shared shot set for scripts/engine-compare. Units: mm, mm/s, app frame (x along the long rail 0..W, y 0..H, 9ft table). Straight shots offset the object ball by 0.01 mm: pooltool 0.6.0 reports phantom ball-ball events for exactly collinear balls. Cue ball state is set directly (no stick model): speed, angleDeg (0 = +x), topspin = roll spin / natural roll (1 natural roll, 0 stun, <0 backspin), side = R*english in mm/s (app sign: sideSpin = -R*w.z).",
+  "table": "club-9ft",
+  "sampleDt": 0.01,
+  "maxTime": 15,
+  "shots": [
+    { "id": "slide-roll", "desc": "Stun, ball alone: slide -> roll -> stop", "balls": [{ "id": 0, "x": 500, "y": 635 }], "cue": { "speed": 1000, "angleDeg": 0, "topspin": 0, "side": 0 } },
+    { "id": "backspin-alone", "desc": "Backspin, ball alone", "balls": [{ "id": 0, "x": 500, "y": 635 }], "cue": { "speed": 1500, "angleDeg": 0, "topspin": -1, "side": 0 } },
+    { "id": "cushion-straight", "desc": "Stun straight into the right cushion", "balls": [{ "id": 0, "x": 1800, "y": 635 }], "cue": { "speed": 1500, "angleDeg": 0, "topspin": 0, "side": 0 } },
+    { "id": "cushion-angle", "desc": "Rolling ball, 30 deg into the long cushion, no english", "balls": [{ "id": 0, "x": 800, "y": 400 }], "cue": { "speed": 2000, "angleDeg": 30, "topspin": 1, "side": 0 } },
+    { "id": "cushion-english", "desc": "Same as cushion-angle with english", "balls": [{ "id": 0, "x": 800, "y": 400 }], "cue": { "speed": 2000, "angleDeg": 30, "topspin": 1, "side": 400 } },
+    { "id": "full-follow", "desc": "Full hit, natural roll (follow)", "balls": [{ "id": 0, "x": 800, "y": 635 }, { "id": 1, "x": 1300, "y": 635.01 }], "cue": { "speed": 1500, "angleDeg": 0, "topspin": 1, "side": 0 } },
+    { "id": "full-draw", "desc": "Full hit, heavy backspin (draw)", "balls": [{ "id": 0, "x": 800, "y": 635 }, { "id": 1, "x": 1200, "y": 635.01 }], "cue": { "speed": 2500, "angleDeg": 0, "topspin": -2.5, "side": 0 } },
+    { "id": "half-ball-stun", "desc": "Half-ball cut, stun (30 deg rule / throw)", "balls": [{ "id": 0, "x": 800, "y": 635 }, { "id": 1, "x": 1300, "y": 663.575 }], "cue": { "speed": 2000, "angleDeg": 0, "topspin": 0, "side": 0 } },
+    { "id": "multi-rail", "desc": "Hard shot around several rails with english", "balls": [{ "id": 0, "x": 600, "y": 300 }], "cue": { "speed": 4000, "angleDeg": 32, "topspin": 1, "side": -300 } }
+  ]
+}

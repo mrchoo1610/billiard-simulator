@@ -20,7 +20,6 @@ export const E_BALL = 0.95; // ball-ball restitution
 export const MU_BALL_A = 0.01;
 export const MU_BALL_B = 0.108;
 export const MU_BALL_C = 1.088;
-export const SPIN_NORMAL_KEEP = -0.5; // cushion: normal spin component multiplier
 // Cushion nose contact point: rail nose at 36 mm above the cloth => (36 - R)/R above the ball centre.
 export const CUSHION_CONTACT_SIN = (36 - R) / R;
 export const CUSHION_CONTACT_COS = Math.sqrt(1 - CUSHION_CONTACT_SIN * CUSHION_CONTACT_SIN);
@@ -762,53 +761,66 @@ export class Sim {
   }
 
   /**
-   * Cushion / jaw impact. n = horizontal unit normal pointing into the cushion, vn = v.n > 0.
-   * 1) normal: v_n -> -e v_n; the roll component toward the cushion is reversed and damped (SPIN_NORMAL_KEEP).
-   * 2) friction at the cushion nose contact point r = R(cos(phi) n + sin(phi) up): Coulomb impulse
-   *    Jt = min(mu * (1+e) vn, |u_t| / 3.5) against the pre-impact contact slip u_t (component of v + w x r
-   *    perpendicular to r). Its horizontal part changes v, the vertical part goes into the table; dw = (r x J) / I.
-   *    This makes english bend the rebound (bounded by mu), the cushion bleed english and speed along the rail.
+   * Cushion / jaw impact, Han (2005) "Dynamics in Carom and Three Cushion Billiards" (same equations as
+   * pooltool's han_2005 resolver). n = horizontal unit normal pointing into the cushion, vn = v.n > 0.
+   * Contact at the cushion nose, theta_a above the ball centre (sin = CUSHION_CONTACT_SIN). One impulse:
+   * normal part P_zE = (1+e) vn cos(theta_a); friction part against the contact slip s, Coulomb-limited
+   * (mu = cushionSpinTransfer * muScale), or s/A (A = 7/2) when the slip is fully removed (sticking).
+   * Vertical velocity is not changed (ball stays on the cloth); its effect goes into the spin.
+   * Note: because the impulse acts above the centre, the horizontal normal rebound is
+   * vn * (1 - (1+e) cos^2(theta_a)) - friction part, i.e. a little below e * vn.
    */
   _bounceNormal(b, nx, ny, vn, e, wall, muScale = 1) {
     const v = b.vel;
     const wv = b.w;
-    // pre-impact contact slip at the cushion nose (z down => "up" is -z)
     const C = CUSHION_CONTACT_COS;
     const S = CUSHION_CONTACT_SIN;
-    const rx = R * C * nx;
-    const ry = R * C * ny;
-    const rz = -R * S;
-    // slip along the rail only (t = horizontal tangent); top/back spin into the rail is handled by SPIN_NORMAL_KEEP
-    const tx = -ny;
-    const ty = nx;
-    const ut = (v.x + (wv.y * rz - wv.z * ry)) * tx + (v.y + (wv.z * rx - wv.x * rz)) * ty;
+    // Cushion frame (right-handed): X = n (into the cushion), Z = up = (0,0,-1) in the app's z-down frame,
+    // Y = Z x X = (ny, -nx, 0).
+    const vX = vn;
+    const vY = v.x * ny - v.y * nx;
+    const wX = wv.x * nx + wv.y * ny;
+    const wY = wv.x * ny - wv.y * nx;
+    const wZ = -wv.z;
 
-    v.x -= (1 + e) * vn * nx;
-    v.y -= (1 + e) * vn * ny;
-    // roll vector (velocity units): normal component reversed and damped
-    const sx = -R * wv.y;
-    const sy = R * wv.x;
-    const sn = sx * nx + sy * ny;
-    const k = 1 - SPIN_NORMAL_KEEP;
-    const nsx = sx - k * sn * nx;
-    const nsy = sy - k * sn * ny;
-    wv.y = -nsx / R;
-    wv.x = nsy / R;
-
-    const slip = Math.abs(ut);
+    // Han eq. 14: contact slip at the cushion nose; c = normal approach speed along the contact normal
+    const sx = vX * S + R * wY;
+    const sy = -vY - R * wZ * C + R * wX * S;
+    const A = 3.5;
+    const PzE = (1 + e) * vX * C; // eq. 17 (per unit mass)
+    const slip = Math.hypot(sx, sy);
     const mu = this.sideKick * muScale;
-    if (slip > 1e-9 && mu > 0) {
-      // r is perpendicular to t, so the effective tangential compliance is 1 + R^2/I = 3.5 (per unit mass)
-      const jt = (Math.min(mu * (1 + e) * vn, slip / 3.5) * -ut) / slip;
-      const fx = jt * tx;
-      const fy = jt * ty;
-      v.x += fx;
-      v.y += fy;
-      const kk = 2.5 / (R * R);
-      wv.x += kk * (-rz * fy);
-      wv.y += kk * (rz * fx);
-      wv.z += kk * (rx * fy - ry * fx);
+    let PxE = 0;
+    let PyE = 0;
+    if (slip > 1e-9) {
+      if (slip / A <= mu * PzE) {
+        // eq. 18: friction removes the slip (sticking)
+        PxE = sx / A;
+        PyE = sy / A;
+      } else {
+        // eq. 19: sliding along the cushion
+        PxE = (mu * PzE * sx) / slip;
+        PyE = (mu * PzE * sy) / slip;
+      }
     }
+    // eqs. 21-22: contact frame -> cushion frame
+    const PX = -PxE * S - PzE * C;
+    const PY = PyE;
+    const PZ = PxE * C - PzE * S;
+    // eq. 23
+    const nvX = vX + PX;
+    const nvY = vY + PY;
+    const k = 2.5 / R; // R / I per unit mass
+    const nwX = wX - k * PY * S;
+    const nwY = wY + k * (PX * S - PZ * C);
+    const nwZ = wZ + k * PY * C;
+
+    v.x = nvX * nx + nvY * ny;
+    v.y = nvX * ny - nvY * nx;
+    wv.x = nwX * nx + nwY * ny;
+    wv.y = nwX * ny - nwY * nx;
+    wv.z = -nwZ;
+    b.sliding = true;
     const ch = this.events.cushionHits;
     if (ch.length < 200) ch.push({ id: b.id, time: this.time, wall, speed: vn });
   }

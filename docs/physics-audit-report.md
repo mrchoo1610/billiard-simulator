@@ -1,6 +1,6 @@
 # Báo cáo kiểm tra vật lý (physics audit)
 
-Sinh bởi `scripts/physics-audit.mjs` (chạy: `npm run audit`) vào 2026-11-17. Tiêu chí: `docs/physics-criteria.md`.
+Sinh bởi `scripts/physics-audit.mjs` (chạy: `npm run audit`) vào 2026-11-18. Tiêu chí: `docs/physics-criteria.md`.
 Thiết bị đo: bàn Club 9ft, gậy mặc định (Gậy thường) trừ khi ghi chú khác; các thông số là ước lượng, **không được chỉnh để đạt tiêu chí**.
 Quy ước trạng thái: ĐẠT = trong dung sai của tiêu chí; MỘT PHẦN = trong 2× dung sai hoặc đúng chiều nhưng chưa kiểm hết; KHÔNG ĐẠT = ngoài khoảng đó hoặc sai chiều; CHƯA HỖ TRỢ = ngoài phạm vi mô hình (mục E).
 Giá trị kỳ vọng trong tiêu chí là **[Unverified]** (xem đầu `physics-criteria.md`, Bản 2). Kỳ vọng phụ thuộc e dùng E_BALL của engine và `cushionRestitution` của bàn đang đo.
@@ -40,10 +40,10 @@ Một phần: B4, B6, B8, B10
 | C3 | Trượt cơ (miscue) | tip > giới hạn → 30 % tốc độ, ≤ 3° lệch, không xoáy | miscue=true; tốc độ=30,0 %; lệch=3,00°; \|w\|=0,000 | **ĐẠT** |  |
 | C4 | Khối lượng gậy | gậy nặng → bi nhanh hơn | 539 g: 3962 mm/s; 595 g: 4053 mm/s | **ĐẠT** |  |
 | C5 | Xoáy tối đa hợp lý | R·\|ω\| ≤ 2,5·v·b (b = độ lệch điểm chạm) | R\|ω\|/(2,5·v·b) tại θ=0/5/15°: 0,900 / 0,903 / 0,932 (spinEfficiency=0.9) | **ĐẠT** | Tại θ>0 ω lớn hơn 1/cosθ lần vì xung J được nhân 1/cosθ để giữ nguyên tốc độ ngang |
-| D1 | Phục hồi băng | v pháp tuyến sau/trước 0,70–0,85 | đo=0,7497 (profile club-9ft: 0.75) | **ĐẠT** |  |
-| D2 | Góc phản xạ không xoáy, có tính e + ma sát băng (45°, bi lăn) | v_n' = e·v_n; v_t' = v_t − min(μ_băng·(1+e)·v_n, (1+sinφ)·v_t/3,5) → 49,52° với e=0.75, μ_băng=0.25 (±3°) | góc ra so với băng=49,52° (vào 45°) ngay sau chạm; sai=0,00° | **ĐẠT** |  |
-| D3 | Má phê xuôi/ngược ở băng | vận tốc dọc băng: xuôi > không effet > ngược | vx/vy sau băng: xuôi=1,170; không=0,853; ngược=0,750 | **ĐẠT** | xuôi = má phải khi bi chạy +x dọc băng trên |
-| D4 | Xoáy trên/dưới qua băng | theo: góc với băng giảm dần (0,05 s → 0,35 s); kéo: góc tăng dần | theo: 46,54° → 45,11° (đúng chiều); kéo: 46,07° → 51,94° (đúng chiều) | **ĐẠT** |  |
+| D1 | Phục hồi băng | v pháp tuyến sau/trước 0,70–0,85 | đo=0,7250 (profile club-9ft: 0.75) | **ĐẠT** |  |
+| D2 | Góc phản xạ không xoáy, băng Han 2005 (45°, bi lăn) | Han 2005 (pt. 14–23), mũi băng sinθ=0,260, e=0.75, μ_băng=0.25 → 45,33° (±3°) | góc ra so với băng=45,33° (vào 45°) ngay sau chạm; sai=-0,00° | **ĐẠT** |  |
+| D3 | Má phê xuôi/ngược ở băng | vận tốc dọc băng: xuôi > không effet > ngược | vx/vy sau băng: xuôi=1,210; không=0,988; ngược=0,927 | **ĐẠT** | xuôi = má phải khi bi chạy +x dọc băng trên |
+| D4 | Xoáy trên/dưới qua băng | theo: góc với băng giảm dần (0,05 s → 0,35 s); kéo: góc tăng dần | theo: 42,82° → 30,72° (đúng chiều); kéo: 42,22° → 54,27° (đúng chiều) | **ĐẠT** |  |
 | D5 | Lỗ góc: lệch mép lỗ | lệch 0/20 mm vào, 50 mm bị bật ra; đi sát băng vào được | lệch 0: vào; 20: vào; 50: không; sát băng: vào | **ĐẠT** |  |
 | D6 | Lỗ giữa khó hơn khi góc lớn | góc 30° vào; góc 70° bị từ chối | 30°: vào; 70°: không (bắn thẳng vào tâm lỗ) | **ĐẠT** |  |
 | D7 | Lắc miệng lỗ (pocket jaw rattle) | đánh lệch vào má lỗ bị nảy qua lại ≥ 2 lần và bật ra | số lần đập má lỗ=2; vào lỗ=không | **ĐẠT** |  |

@@ -386,11 +386,26 @@ function firstCushion(setup) {
   const s = 400 / Math.SQRT2;
   const r = firstCushion({ x: 1200, y: 200, vel: { x: s, y: -s } });
   const out = deg(Math.atan2(Math.abs(r.post.vel.y), Math.abs(r.post.vel.x))); // angle off the rail
-  // cushion friction at the nose contact (sin = CUSHION_CONTACT_SIN): rolling ball slip along the rail = (1+sin)·vt
+  // Han (2005) eqs. 14-23 written out for this case: rolling ball, no english, cushion frame
+  // (X into the cushion, Y along it, Z up): vX = vY = s, rolling => wY = vX/R, wX = -vY/R, wZ = 0.
   const MU_C = TABLE.cushionSpinTransfer;
-  const vt1 = s - Math.min(MU_C * (1 + EC) * s, ((1 + CUSHION_CONTACT_SIN) * s) / 3.5);
-  const expOut = deg(Math.atan2(EC * s, vt1));
-  add('D2', 'Góc phản xạ không xoáy, có tính e + ma sát băng (45°, bi lăn)', `v_n' = e·v_n; v_t' = v_t − min(μ_băng·(1+e)·v_n, (1+sinφ)·v_t/3,5) → ${f(expOut, 2)}° với e=${EC}, μ_băng=${MU_C} (±3°)`, `góc ra so với băng=${f(out, 2)}° (vào 45°) ngay sau chạm; sai=${f(out - expOut, 2)}°`, byErr(Math.abs(out - expOut), 3));
+  const sn = CUSHION_CONTACT_SIN;
+  const cs = Math.sqrt(1 - sn * sn);
+  const vX = s;
+  const vY = s;
+  const wX = -vY / R;
+  const wY = vX / R;
+  const hx = vX * sn + R * wY;
+  const hy = -vY + R * wX * sn;
+  const PzE = (1 + EC) * vX * cs;
+  const hs = Math.hypot(hx, hy);
+  const stick = hs / 3.5 <= MU_C * PzE;
+  const PxE = stick ? hx / 3.5 : (MU_C * PzE * hx) / hs;
+  const PyE = stick ? hy / 3.5 : (MU_C * PzE * hy) / hs;
+  const nvX = vX - PxE * sn - PzE * cs;
+  const nvY = vY + PyE;
+  const expOut = deg(Math.atan2(Math.abs(nvX), Math.abs(nvY)));
+  add('D2', 'Góc phản xạ không xoáy, băng Han 2005 (45°, bi lăn)', `Han 2005 (pt. 14–23), mũi băng sinθ=${f(sn, 3)}, e=${EC}, μ_băng=${MU_C} → ${f(expOut, 2)}° (±3°)`, `góc ra so với băng=${f(out, 2)}° (vào 45°) ngay sau chạm; sai=${f(out - expOut, 2)}°`, byErr(Math.abs(out - expOut), 3));
 }
 {
   const out = (side) => {

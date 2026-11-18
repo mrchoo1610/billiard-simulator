@@ -268,23 +268,19 @@ test('pocket jaws rattle off-centre corner and side shots instead of vanishing',
 });
 
 test('slower cloth gives a shorter roll distance', () => {
-  const run = (muRoll) => {
-    const table = { ...tablePreset('club-9ft'), muRoll };
-    const r = simulate([createBall(0, 300, 635)], { aimDir: { x: 1, y: 0 }, power: P(0.12), tip: { x: 0, y: 0 } }, { table, maxTime: 30 });
-    return r.balls[0].pos.x - 300;
-  };
-  const fast = run(0.008);
-  const slow = run(0.015);
-  assert.ok(fast > slow + 50, `fast ${fast} vs slow ${slow}`);
-  // presets: bar cloth (slow) rolls shorter than pro cloth (fast) on the same shot
+  // distance travelled along the path (the ball may reach a cushion and come back, so not the net displacement)
   const shot = { aimDir: { x: 1, y: 0 }, power: P(0.12), tip: { x: 0, y: 0 } };
-  const rolledDist = (table) => {
-    const r = simulate([createBall(0, 300, 495)], shot, { table, maxTime: 30, recordPaths: true });
+  const rolledDist = (table, y = 495) => {
+    const r = simulate([createBall(0, 300, y)], shot, { table, maxTime: 30, recordPaths: true });
     const pts = r.balls[0].path;
     let total = 0;
     for (let i = 1; i < pts.length; i++) total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
     return total;
   };
+  const fast = rolledDist({ ...tablePreset('club-9ft'), muRoll: 0.008 }, 635);
+  const slow = rolledDist({ ...tablePreset('club-9ft'), muRoll: 0.015 }, 635);
+  assert.ok(fast > slow + 50, `fast ${fast} vs slow ${slow}`);
+  // presets: bar cloth (slow) rolls shorter than pro cloth (fast) on the same shot
   assert.ok(rolledDist(tablePreset('pro-9ft')) > rolledDist(tablePreset('bar-7ft')));
 });
 
