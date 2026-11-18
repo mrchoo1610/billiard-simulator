@@ -612,3 +612,12 @@ test('Overlay rules: Bot mode has no aim aids (realistic aim only)', () => {
   assert.equal(overlays.pocket, false);
   assert.equal(overlays.predict, false);
 });
+
+test('Bot pots a hanger (ball resting in the pocket mouth past the cushion line) instead of fouling', () => {
+  // layout from a stuck benchmark rack: 8 hangs in corner pocket 0, its ghost via the pocket aim point is behind the rail
+  const balls = [createBall(9, 307.44, 1194.79), createBall(8, 33.82, -5.4), createBall(0, 1518.99, 971.03)];
+  const shot = chooseBotShot(balls, geo, eq, 'hard', { game: '9ball', rng: () => 0.5 });
+  const r = simulate(balls, { aimDir: shot.aimDir, power: shot.power, tip: shot.tip, elevationDeg: shot.elevationDeg }, { ...eq, rng: () => 0.5, orientation: false });
+  assert.equal(r.events.firstContact, 8, 'cue ball reaches the hanger first');
+  assert.ok(r.events.potted.includes(8), 'hanger is potted');
+});

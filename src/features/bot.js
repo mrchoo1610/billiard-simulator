@@ -447,18 +447,28 @@ export function evaluateEightBallTurn({ ballsBefore, simBalls, events, turn, gro
 function scorePocketCandidates(cuePos, balls, target, geo) {
   const targetId = target.id;
   const out = [];
+  const pastCushion = (p) => p.x < R || p.y < R || p.x > geo.W - R || p.y > geo.H - R;
   for (let i = 0; i < geo.POCKETS.length; i++) {
     const pocket = geo.POCKETS[i];
-    const aimPt = pocket.aim || pocket;
+    // Hanger: ball resting in the pocket mouth past the cushion line. The pocket aim point is then behind it
+    // (on the table side), so aim straight through the ball centre: any full hit drops it.
+    const hanger = pastCushion(target.pos) && dist(target.pos, { x: pocket.cx, y: pocket.cy }) < pocket.dropR + R;
+    let aimPt = pocket.aim || pocket;
+    if (hanger) {
+      const d = norm(sub(target.pos, cuePos));
+      aimPt = { x: target.pos.x + d.x * 4 * R, y: target.pos.y + d.y * 4 * R };
+    }
     const shot = computeShot(cuePos, target.pos, aimPt, R);
     if (!shot.possible || shot.cutAngleDeg > 76) continue;
+    // the cue ball cannot reach a ghost position behind a cushion
+    if (geo.WALLS.some((w) => w.depth(shot.ghost) < R - 2 && !w.gap(w.along(shot.ghost)))) continue;
 
     // Require object ball trajectory into pocket jaw mouth (respecting minCos)
-    const entryCos = -(shot.objDir.x * pocket.axis.x + shot.objDir.y * pocket.axis.y);
+    const entryCos = hanger ? 1 : -(shot.objDir.x * pocket.axis.x + shot.objDir.y * pocket.axis.y);
     if (entryCos < (pocket.minCos ?? 0.2)) continue;
 
     if (isPathBlocked(cuePos, shot.ghost, balls, R, [0, targetId]) !== null) continue;
-    if (isPathBlocked(target.pos, aimPt, balls, R, [0, targetId]) !== null) continue;
+    if (!hanger && isPathBlocked(target.pos, aimPt, balls, R, [0, targetId]) !== null) continue;
     if (isOverlap(shot.ghost, balls, [0, targetId], 2 * R + 1)) continue;
 
     const dCue = dist(cuePos, shot.ghost);
@@ -918,6 +928,7 @@ export function chooseBotShot(balls, geo, eq, difficulty = 'medium', opts = {}) 
     for (const cand of topCands) {
       const candTargetId = cand.targetId;
       const nextTarget = findNextTarget(balls, candTargetId, game, group);
+      // (hangers keep the normal power: a firm hit stuns the cue ball; a soft one rolls it into the pocket after the ball)
       const basePower = clamp(0.32 + (cand.dCue + cand.dObj) / 2600 + (1 - Math.cos(rad(cand.shot.cutAngleDeg))) * 0.16, 0.28, 0.84);
       const powersToTry = diff.proSpin && nextTarget ? [basePower, clamp(basePower * 0.78, 0.28, 0.78)] : [basePower];
 
